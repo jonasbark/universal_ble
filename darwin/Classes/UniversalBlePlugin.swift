@@ -91,7 +91,15 @@ private class BleCentralDarwin: NSObject, UniversalBlePlatformChannel, CBCentral
   func connect(deviceId: String) throws {
     let peripheral = try deviceId.getPeripheral(manager: manager)
     peripheral.delegate = self
-    manager.connect(peripheral)
+    let options: [String: Any] = [
+           // Notifies the app when the peripheral connects, even if the app is in the background
+           CBConnectPeripheralOptionNotifyOnConnectionKey: true,
+           // Notifies the app when the peripheral disconnects, even if the app is in the background
+           CBConnectPeripheralOptionNotifyOnDisconnectionKey: true,
+           // Wake up the app when the peripheral sends notifications while in background
+           CBConnectPeripheralOptionNotifyOnNotificationKey: true,
+       ]
+    manager.connect(peripheral, options: options)
   }
 
   func disconnect(deviceId: String) throws {
