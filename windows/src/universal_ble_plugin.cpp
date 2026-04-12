@@ -991,6 +991,12 @@ namespace universal_ble
       GattServiceObject gatt_service;
       gatt_service.obj = service;
       std::string service_uuid = guid_to_uuid(service.Uuid());
+      // Open service in shared mode to allow other apps to access it simultaneously
+      auto open_status = co_await service.OpenAsync(GattSharingMode::SharedReadAndWrite);
+      if (open_status != GattOpenStatus::Success)
+      {
+        std::cout << "Failed to open service in shared mode: " << service_uuid << std::endl;
+      }
       auto characteristics_result = co_await service.GetCharacteristicsAsync(BluetoothCacheMode::Uncached);
       auto characteristics_result_error = gatt_communication_status_to_error(characteristics_result.Status());
 
