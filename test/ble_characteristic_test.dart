@@ -12,6 +12,7 @@ BleCharacteristic mockBleCharacteristic = BleCharacteristic.withMetaData(
   serviceId: serviceId,
   uuid: characteristicId,
   properties: CharacteristicProperty.values,
+  descriptors: [],
 );
 BleService mockBleService = BleService(serviceId, [mockBleCharacteristic]);
 
@@ -86,7 +87,8 @@ class _UniversalBleMock extends UniversalBlePlatformMock {
   Uint8List? charValue;
 
   @override
-  Future<List<BleService>> discoverServices(String deviceId) async {
+  Future<List<BleService>> discoverServices(
+      String deviceId, bool withDescriptors) async {
     return <BleService>[mockBleService];
   }
 
@@ -104,6 +106,7 @@ class _UniversalBleMock extends UniversalBlePlatformMock {
         deviceId,
         characteristic,
         Uint8List.fromList([1, 2, 3]),
+        DateTime.now().millisecondsSinceEpoch,
       );
     });
   }
@@ -123,5 +126,15 @@ class _UniversalBleMock extends UniversalBlePlatformMock {
       String deviceId, String service, String characteristic,
       {Duration? timeout}) async {
     return charValue ?? Uint8List(0);
+  }
+
+  @override
+  Future<void> requestPermissions({bool withAndroidFineLocation = false}) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<int> readRssi(String deviceId) async {
+    return -50; // Mock RSSI value
   }
 }

@@ -1,3 +1,38 @@
+## 2.0.0
+* Add peripheral mode on Android, iOS, macOS, and Windows
+* Add `requestConnectionPriority` to allow tuning BLE connection intervals on Android
+* Add SPM support on Apple
+
+## 1.2.0
+* Add `autoConnect` parameter to `connect()` method for automatic reconnection support on Android and iOS/macOS
+* Add `serviceData` in `BleDevice`
+* Add `AndroidScanMode` and `reportDelayMillis` to `AndroidOptions` for scanning
+* Add support for BLE scanning from background services (ForegroundTask) on Android. `PermissionHandler` is now activity-aware and succeeds silently if permissions are already granted when no activity is available
+* Always use custom scan filter on Windows
+* Fix Windows crash by handling WinRT exceptions in BLE callback paths
+* Add serviceData tracking in Linux advertisements
+
+## 1.1.0
+* Add readRssi method
+
+## 1.0.1
+* Enforce C++20 standard for Windows builds
+
+## 1.0.0
+* BREAKING CHANGE: `OnValueChange` callback also includes timestamp
+* BREAKING CHANGE: Bump minimum IOS version to 13.1
+* BREAKING CHANGE: Bump minimum MacOS version to 10.15
+* Fix Windows 11 crash on cancelling pairing
+* Unified error codes for all platforms
+* Add `isScanning` api
+* Add `hasPermissions` api
+* Add `requestPermissions` api and auto ask permission on `startScan`
+* `disconnect` now waits for disconnection confirmation before returning
+* Improve Windows disconnection event handling and cleanup
+* Add `withDescriptors` parameter in `discoverServices` API
+* Add `timestamp` in `BleDevice` 
+* Add `setLogLevel` api for configuring logs
+
 ## 0.21.1
 * Fix device name resolution on Windows
 * Add `exclusionFilters` to filter out devices from scan results

@@ -8,12 +8,16 @@ extension BleServiceExtension on BleService {
   /// with the given UUID is not available.
   BleCharacteristic getCharacteristic(String characteristicId) {
     if (characteristics.isEmpty) {
-      throw CharacteristicNotFoundException('No characteristics found');
+      throw UniversalBleException(
+        code: UniversalBleErrorCode.characteristicNotFound,
+        message: 'No characteristics found',
+      );
     }
     return characteristics.firstWhere(
       (c) => BleUuidParser.compareStrings(c.uuid, characteristicId),
-      orElse: () => throw CharacteristicNotFoundException(
-        'Characteristic "$characteristicId" not available',
+      orElse: () => throw UniversalBleException(
+        code: UniversalBleErrorCode.characteristicNotFound,
+        message: 'Characteristic "$characteristicId" not available',
       ),
     );
   }

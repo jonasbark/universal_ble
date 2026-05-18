@@ -16,12 +16,24 @@ extension BleDeviceExtension on BleDevice {
       BleConnectionState.connected;
 
   /// Connects to the device.
-  Future<void> connect() => UniversalBle.connect(deviceId);
+  /// [autoConnect] enables automatic reconnection when the device becomes available.
+  Future<void> connect({bool autoConnect = false, Duration? timeout}) =>
+      UniversalBle.connect(
+        deviceId,
+        autoConnect: autoConnect,
+        timeout: timeout,
+      );
 
   /// Disconnects from the device.
   Future<void> disconnect() => UniversalBle.disconnect(deviceId);
 
-  /// Requests a specific MTU (Maximum Transmission Unit) size for the connection.
+  /// Requests an MTU (Maximum Transmission Unit) value for the connection.
+  ///
+  /// **⚠️ Note:** Requesting an MTU is a *best-effort* operation. The final MTU is
+  /// often controlled by the OS and remote device. Returns the negotiated MTU value,
+  /// which may differ from `expectedMtu`.
+  ///
+  /// See [UniversalBle.requestMtu] for platform limitations and best practices.
   Future<int> requestMtu(int expectedMtu) =>
       UniversalBle.requestMtu(deviceId, expectedMtu);
 
@@ -31,10 +43,7 @@ extension BleDeviceExtension on BleDevice {
   /// Returns true/false if it manages to execute the command.
   /// Returns null when no `pairingCommand` is passed.
   /// Note that it will trigger pairing if the device is not already paired.
-  Future<bool?> isPaired({
-    BleCommand? pairingCommand,
-    Duration? timeout,
-  }) {
+  Future<bool?> isPaired({BleCommand? pairingCommand, Duration? timeout}) {
     return UniversalBle.isPaired(
       deviceId,
       pairingCommand: pairingCommand,
@@ -53,10 +62,7 @@ extension BleDeviceExtension on BleDevice {
   ///
   /// On `Web/Windows` and `Web/Linux`, it does not work for devices that use `ConfirmOnly` pairing.
   /// Can throw `PairingException`, `ConnectionException` or `PlatformException`.
-  Future<void> pair({
-    BleCommand? pairingCommand,
-    Duration? timeout,
-  }) {
+  Future<void> pair({BleCommand? pairingCommand, Duration? timeout}) {
     return UniversalBle.pair(
       deviceId,
       pairingCommand: pairingCommand,
@@ -67,9 +73,7 @@ extension BleDeviceExtension on BleDevice {
   /// Unpair a device.
   ///
   /// It might throw an error if device is not paired.
-  Future<void> unpair({
-    Duration? timeout,
-  }) =>
+  Future<void> unpair({Duration? timeout}) =>
       UniversalBle.unpair(deviceId, timeout: timeout);
 
   /// Discovers the services offered by the device.
@@ -77,9 +81,11 @@ extension BleDeviceExtension on BleDevice {
   /// Returns cached services if already discovered after connection.
   Future<List<BleService>> discoverServices({
     Duration? timeout,
+    bool withDescriptors = false,
   }) async {
     List<BleService> servicesCache = await UniversalBle.discoverServices(
       deviceId,
+      withDescriptors: withDescriptors,
       timeout: timeout,
     );
     CacheHandler.instance.saveServices(deviceId, servicesCache);
@@ -90,7 +96,7 @@ extension BleDeviceExtension on BleDevice {
   ///
   /// [service] is the UUID of the service.
   /// [preferCached] indicates whether to use cached services. If cache is empty, discoverServices() will be called.
-  /// might throw [NotFoundException]
+  /// might throw [UniversalBleException]
   Future<BleService> getService(
     String service, {
     bool preferCached = true,
@@ -105,13 +111,17 @@ extension BleDeviceExtension on BleDevice {
     }
 
     if (discoveredServices.isEmpty) {
-      throw ServiceNotFoundException('No services found');
+      throw UniversalBleException(
+        code: UniversalBleErrorCode.serviceNotFound,
+        message: 'No services found',
+      );
     }
 
     return discoveredServices.firstWhere(
       (s) => BleUuidParser.compareStrings(s.uuid, service),
-      orElse: () => throw ServiceNotFoundException(
-        'Service "$service" not available',
+      orElse: () => throw UniversalBleException(
+        code: UniversalBleErrorCode.serviceNotFound,
+        message: 'Service "$service" not available',
       ),
     );
   }
@@ -121,7 +131,7 @@ extension BleDeviceExtension on BleDevice {
   /// [service] is the UUID of the service.
   /// [characteristic] is the UUID of the characteristic.
   /// [preferCached] indicates whether to use cached services. If cache is empty, discoverServices() will be called.
-  /// might throw [NotFoundException]
+  /// might throw [UniversalBleException]
   Future<BleCharacteristic> getCharacteristic(
     String characteristic, {
     required String service,

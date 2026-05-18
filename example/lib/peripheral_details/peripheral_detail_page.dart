@@ -81,11 +81,14 @@ class _PeripheralDetailPageState extends State<PeripheralDetailPage> {
     }
   }
 
-  void _handleValueChange(
-      String deviceId, String characteristicId, Uint8List value) {
+  void _handleValueChange(String deviceId, String characteristicId,
+      Uint8List value, int? timestamp) {
     String s = String.fromCharCodes(value);
     String data = '$s\nraw :  ${value.toString()}';
-    debugPrint('_handleValueChange $characteristicId, $s');
+    DateTime? timestampDateTime = timestamp != null
+        ? DateTime.fromMillisecondsSinceEpoch(timestamp)
+        : null;
+    debugPrint('_handleValueChange ($timestampDateTime) $characteristicId, $s');
     _addLog("Value", data);
   }
 
@@ -98,7 +101,7 @@ class _PeripheralDetailPageState extends State<PeripheralDetailPage> {
     const webWarning =
         "Note: Only services added in ScanFilter or WebOptions will be discovered";
     try {
-      var services = await bleDevice.discoverServices();
+      var services = await bleDevice.discoverServices(withDescriptors: false);
       debugPrint('${services.length} services discovered');
       debugPrint(services.toString());
       setState(() {
@@ -260,8 +263,16 @@ class _PeripheralDetailPageState extends State<PeripheralDetailPage> {
                             PlatformButton(
                               text: 'Disconnect',
                               enabled: isConnected,
-                              onPressed: () {
-                                bleDevice.disconnect();
+                              onPressed: () async {
+                                try {
+                                  await bleDevice.disconnect();
+                                  _addLog("DisconnectResult", true);
+                                } catch (e) {
+                                  _addLog(
+                                    'DisconnectError (${e.runtimeType})',
+                                    e,
+                                  );
+                                }
                               },
                             ),
                           ],

@@ -13,70 +13,32 @@ import Foundation
     import FlutterMacOS
 #endif
 
-enum BleInputProperty: Int {
-    case disabled = 0
-    case notification = 1
-    case indication = 2
-}
-
-enum BleOutputProperty: Int {
-    case withResponse = 0
-    case withoutResponse = 1
-}
-
-enum BlueConnectionState: Int64 {
-    case connected = 0
-    case disconnected = 1
-    case connecting = 2
-    case disconnecting = 3
-}
-
-enum AvailabilityState: Int64 {
-    case unknown = 0
-    case resetting = 1
-    case unsupported = 2
-    case unauthorized = 3
-    case poweredOff = 4
-    case poweredOn = 5
-}
-
-enum CharacteristicProperty: Int64 {
-    case broadcast = 0
-    case read = 1
-    case writeWithoutResponse = 2
-    case write = 3
-    case notify = 4
-    case indicate = 5
-    case authenticatedSignedWrites = 6
-    case extendedProperties = 7
-}
-
 extension CBCharacteristicProperties {
-    var toCharacteristicProperty: [Int64] {
-        var properties = [Int64]()
+    var toCharacteristicProperty: [CharacteristicProperty] {
+        var properties = [CharacteristicProperty]()
         if contains(.broadcast) {
-            properties.append(CharacteristicProperty.broadcast.rawValue)
+            properties.append(.broadcast)
         }
         if contains(.read) {
-            properties.append(CharacteristicProperty.read.rawValue)
+            properties.append(.read)
         }
         if contains(.writeWithoutResponse) {
-            properties.append(CharacteristicProperty.writeWithoutResponse.rawValue)
+            properties.append(.writeWithoutResponse)
         }
         if contains(.write) {
-            properties.append(CharacteristicProperty.write.rawValue)
+            properties.append(.write)
         }
         if contains(.notify) {
-            properties.append(CharacteristicProperty.notify.rawValue)
+            properties.append(.notify)
         }
         if contains(.indicate) {
-            properties.append(CharacteristicProperty.indicate.rawValue)
+            properties.append(.indicate)
         }
         if contains(.authenticatedSignedWrites) {
-            properties.append(CharacteristicProperty.authenticatedSignedWrites.rawValue)
+            properties.append(.authenticatedSignedWrites)
         }
         if contains(.extendedProperties) {
-            properties.append(CharacteristicProperty.extendedProperties.rawValue)
+            properties.append(.extendedProperties)
         }
         return properties
     }
@@ -86,29 +48,86 @@ extension CBManagerState {
     func toAvailabilityState() -> AvailabilityState {
         switch self {
         case .unknown:
-            return AvailabilityState.unknown
+            return .unknown
         case .resetting:
-            return AvailabilityState.resetting
+            return .resetting
         case .unsupported:
-            return AvailabilityState.unsupported
+            return .unsupported
         case .unauthorized:
-            return AvailabilityState.unauthorized
+            return .unauthorized
         case .poweredOff:
-            return AvailabilityState.poweredOff
+            return .poweredOff
         case .poweredOn:
-            return AvailabilityState.poweredOn
+            return .poweredOn
         @unknown default:
-            return AvailabilityState.unknown
+            return .unknown
         }
     }
 }
 
+/// Maps string error codes to UniversalBleErrorCode enum
+func mapErrorCodeToEnum(_ code: String) -> UniversalBleErrorCode {
+    switch code.lowercased() {
+    case "notsupported", "not_supported":
+        return .notSupported
+    case "notimplemented", "not_implemented":
+        return .notImplemented
+    case "channel-error", "channelerror":
+        return .channelError
+    case "failed":
+        return .failed
+    case "devicedisconnected", "device_disconnected":
+        return .deviceDisconnected
+    case "illegalargument", "illegal_argument":
+        return .illegalArgument
+    case "invalidaction", "invalid_action":
+        return .invalidAction
+    case "readfailed", "read_failed":
+        return .readFailed
+    case "devicenotfound", "device_not_found":
+        return .deviceNotFound
+    case "servicenotfound", "service_not_found":
+        return .serviceNotFound
+    case "characteristicnotfound", "characteristic_not_found":
+        return .characteristicNotFound
+    case "invalidserviceuuid", "invalid_service_uuid":
+        return .invalidServiceUuid
+    case "characteristicdoesnotsupportread":
+        return .characteristicDoesNotSupportRead
+    case "characteristicdoesnotsupportwrite":
+        return .characteristicDoesNotSupportWrite
+    case "characteristicdoesnotsupportwritewithoutresponse":
+        return .characteristicDoesNotSupportWriteWithoutResponse
+    case "characteristicdoesnotsupportnotify":
+        return .characteristicDoesNotSupportNotify
+    case "characteristicdoesnotsupportindicate":
+        return .characteristicDoesNotSupportIndicate
+    default:
+        return .unknownError
+    }
+}
+
+/// Creates a PigeonError with the error code enum in details
+func createFlutterError(
+    code: UniversalBleErrorCode,
+    message: String? = nil,
+    details: String? = nil
+) -> PigeonError {
+    // Pass the enum's rawValue (Int) in code as string, and enum name in details
+    return PigeonError(
+        code: code.rawValue.description,
+        message: message,
+        details: details ?? code.rawValue
+    )
+}
+
 extension Error {
-    func toPigeonError() -> PigeonError {
+    func toFlutterError() -> PigeonError {
         let nsError = self as NSError
         let errorCode: String = .init(nsError.code)
         let errorDescription: String = nsError.localizedDescription
-        return PigeonError(code: errorCode, message: errorDescription, details: nil)
+        let mappedCode = mapErrorCodeToEnum(errorCode)
+        return createFlutterError(code: mappedCode, message: errorDescription, details: errorCode)
     }
 }
 
@@ -197,6 +216,16 @@ class DiscoverServicesFuture {
     let result: (Result<[UniversalBleService], Error>) -> Void
 
     init(deviceId: String, result: @escaping (Result<[UniversalBleService], Error>) -> Void) {
+        self.deviceId = deviceId
+        self.result = result
+    }
+}
+
+class RssiReadFuture {
+    let deviceId: String
+    let result: (Result<Int64, Error>) -> Void
+
+    init(deviceId: String, result: @escaping (Result<Int64, Error>) -> Void) {
         self.deviceId = deviceId
         self.result = result
     }

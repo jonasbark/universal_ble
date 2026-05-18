@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothDevice.BOND_BONDED
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
@@ -18,13 +17,11 @@ import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.BroadcastReceiver
 import android.content.Context
-import android.content.Context.RECEIVER_EXPORTED
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -32,15 +29,18 @@ import io.flutter.plugin.common.PluginRegistry
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-
-
-private const val TAG = "UniversalBlePlugin"
+import androidx.core.content.edit
 
 @SuppressLint("MissingPermission")
 class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(), FlutterPlugin,
-    ActivityAware, PluginRegistry.ActivityResultListener {
+    UniversalBleAndroidChannel,
+    ActivityAware, PluginRegistry.ActivityResultListener,
+    PluginRegistry.RequestPermissionsResultListener {
     private val bluetoothEnableRequestCode = 2342313
     private val bluetoothDisableRequestCode = 2342414
+    private val permissionRequestCode = 2342515
+    private val advertisePermissionRequestCode = 2342616
+    private var permissionHandler: PermissionHandler? = null
     private var callbackChannel: UniversalBleCallbackChannel? = null
     private var mainThreadHandler: Handler? = null
     private lateinit var context: Context
@@ -49,6 +49,7 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
     private lateinit var safeScanner: SafeScanner
     private val cachedServicesMap = mutableMapOf<String, List<String>>()
     private val universalBleFilterUtil = UniversalBleFilterUtil()
+    private lateinit var peripheralPlugin: UniversalBlePeripheralPlugin
 
     // Flutter Futures
     private var bluetoothEnableRequestFuture: ((Result<Boolean>) -> Unit)? = null
@@ -59,39 +60,76 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
     private val writeResultFutureList = mutableListOf<WriteResultFuture>()
     private val subscriptionResultFutureList = mutableListOf<SubscriptionResultFuture>()
     private val pairResultFutures = mutableMapOf<String, (Result<Boolean>) -> Unit>()
+    private val rssiResultFutureList = mutableListOf<RssiResultFuture>()
+    private val autoConnectDevices = mutableSetOf<String>()
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-        UniversalBlePlatformChannel.setUp(flutterPluginBinding.binaryMessenger, this)
-        callbackChannel = UniversalBleCallbackChannel(flutterPluginBinding.binaryMessenger)
         context = flutterPluginBinding.applicationContext
         mainThreadHandler = Handler(Looper.getMainLooper())
+        permissionHandler = PermissionHandler(
+            context,
+            permissionRequestCode,
+            advertisePermissionRequestCode,
+        )
         bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         safeScanner = SafeScanner(bluetoothManager)
 
+        UniversalBlePlatformChannel.setUp(flutterPluginBinding.binaryMessenger, this)
+        UniversalBleAndroidChannel.setUp(flutterPluginBinding.binaryMessenger, this)
+        peripheralPlugin = UniversalBlePeripheralPlugin(
+            flutterPluginBinding.applicationContext,
+            bluetoothManager,
+            flutterPluginBinding.binaryMessenger
+        )
+        UniversalBlePeripheralChannel.setUp(flutterPluginBinding.binaryMessenger, peripheralPlugin)
+        callbackChannel = UniversalBleCallbackChannel(flutterPluginBinding.binaryMessenger)
+
+
         val intentFilter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
         intentFilter.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(broadcastReceiver, intentFilter, RECEIVER_EXPORTED)
-        } else {
-            context.registerReceiver(broadcastReceiver, intentFilter)
-        }
+        context.registerReceiverCompat(broadcastReceiver, intentFilter, exported = true)
         cachedServicesMap.putAll(getCachedServicesMap())
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         bluetoothManager.adapter.bluetoothLeScanner?.stopScan(scanCallback)
         context.unregisterReceiver(broadcastReceiver)
+        peripheralPlugin.dispose()
+        UniversalBlePeripheralChannel.setUp(binding.binaryMessenger, null)
+        UniversalBleAndroidChannel.setUp(binding.binaryMessenger, null)
         callbackChannel = null
         mainThreadHandler = null
+        permissionHandler = null
     }
 
-    override fun getBluetoothAvailabilityState(callback: (Result<Long>) -> Unit) {
+    override fun getBluetoothAvailabilityState(callback: (Result<AvailabilityState>) -> Unit) {
         callback(
             Result.success(
                 bluetoothManager.adapter?.state?.toAvailabilityState()
-                    ?: AvailabilityState.Unknown.value
+                    ?: AvailabilityState.UNKNOWN
             )
         )
+    }
+
+    override fun hasPermissions(withAndroidFineLocation: Boolean): Boolean {
+        return permissionHandler?.hasPermissions(withAndroidFineLocation) ?: false
+    }
+
+    override fun requestPermissions(
+        withAndroidFineLocation: Boolean,
+        callback: (Result<Unit>) -> Unit,
+    ) {
+        if (permissionHandler == null) {
+            callback(
+                Result.failure(
+                    createFlutterError(
+                        UniversalBleErrorCode.FAILED,
+                        "PermissionHandler is not initialized"
+                    )
+                )
+            )
+        }
+        permissionHandler?.requestPermissions(withAndroidFineLocation, callback)
     }
 
     override fun enableBluetooth(callback: (Result<Boolean>) -> Unit) {
@@ -102,7 +140,10 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
         if (bluetoothEnableRequestFuture != null) {
             callback(
                 Result.failure(
-                    FlutterError("Failed", "Bluetooth enable request in progress", null)
+                    createFlutterError(
+                        UniversalBleErrorCode.OPERATION_IN_PROGRESS,
+                        "Bluetooth enable request in progress"
+                    )
                 )
             )
             return
@@ -120,7 +161,10 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
         if (bluetoothDisableRequestFuture != null) {
             callback(
                 Result.failure(
-                    FlutterError("Failed", "Bluetooth disable request in progress", null)
+                    createFlutterError(
+                        UniversalBleErrorCode.OPERATION_IN_PROGRESS,
+                        "Bluetooth disable request in progress"
+                    )
                 )
             )
             return
@@ -130,10 +174,10 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
         bluetoothDisableRequestFuture = callback
     }
 
-    override fun startScan(filter: UniversalScanFilter?) {
-        if (!isBluetoothAvailable()) throw FlutterError(
-            "BluetoothNotEnabled",
-            "Bluetooth not enabled",
+    override fun startScan(filter: UniversalScanFilter?, config: UniversalScanConfig?) {
+        if (!isBluetoothAvailable()) throw createFlutterError(
+            UniversalBleErrorCode.BLUETOOTH_NOT_ENABLED,
+            "Bluetooth not enabled"
         )
 
         val builder = ScanSettings.Builder()
@@ -141,106 +185,217 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
             builder.setPhy(ScanSettings.PHY_LE_ALL_SUPPORTED)
             builder.setLegacy(false)
         }
+        config?.android?.let { androidConfig ->
+            androidConfig.scanMode?.parse()?.let { scanMode ->
+                builder.setScanMode(scanMode)
+            }
+            androidConfig.reportDelayMillis?.let { reportDelay ->
+                builder.setReportDelay(reportDelay)
+            }
+        }
         val settings = builder.build()
 
-        val usesCustomFilters = filter?.usesCustomFilters() ?: false;
+        val usesCustomFilters = filter?.usesCustomFilters() ?: false
 
         try {
-            val filterServices = filter?.withServices?.filterNotNull()?.toUUIDList() ?: emptyList()
+            val filterServices = filter?.withServices?.toUUIDList() ?: emptyList()
             var scanFilters = emptyList<ScanFilter>()
 
             // Set custom scan filter only if required
             if (usesCustomFilters) {
-                Log.e(TAG, "Using Custom Filters")
+                UniversalBleLogger.logError("Using Custom Filters")
                 universalBleFilterUtil.scanFilter = filter
                 universalBleFilterUtil.serviceFilterUUIDS = filterServices
             } else {
                 universalBleFilterUtil.scanFilter = null
-                scanFilters = filter?.toScanFilters(filterServices) ?: emptyList<ScanFilter>()
+                scanFilters = filter?.toScanFilters(filterServices) ?: emptyList()
             }
 
             safeScanner.startScan(
                 scanFilters, settings, scanCallback
             )
         } catch (e: Exception) {
-            throw FlutterError(
-                "illegalIllegalArgument",
+            throw createFlutterError(
+                UniversalBleErrorCode.FAILED,
                 "Failed to start Scan",
-                e.toString()
+                details = e.toString()
             )
         }
     }
 
     override fun stopScan() {
-        if (!isBluetoothAvailable()) throw FlutterError(
-            "BluetoothNotEnabled",
-            "Bluetooth not enabled",
+        if (!isBluetoothAvailable()) throw createFlutterError(
+            UniversalBleErrorCode.BLUETOOTH_NOT_ENABLED,
+            "Bluetooth not enabled"
         )
         // check if already scanning
         safeScanner.stopScan(scanCallback)
     }
 
-    override fun connect(deviceId: String) {
+    override fun isScanning(): Boolean {
+        return safeScanner.isScanning()
+    }
+
+    override fun connect(deviceId: String, autoConnect: Boolean?) {
         // If already connected, send connected message,
         // if connecting, do nothing
         deviceId.findGatt()?.let {
             val currentState = bluetoothManager.getConnectionState(it.device, BluetoothProfile.GATT)
             if (currentState == BluetoothGatt.STATE_CONNECTED) {
-                Log.e(TAG, "$deviceId Already connected")
+                UniversalBleLogger.logError("$deviceId Already connected")
                 mainThreadHandler?.post {
                     callbackChannel?.onConnectionChanged(deviceId, true, null) {}
                 }
                 return
             } else if (currentState == BluetoothGatt.STATE_CONNECTING) {
-                throw FlutterError("Connecting", "Connection already in progress", null)
+                throw createFlutterError(
+                    UniversalBleErrorCode.CONNECTION_IN_PROGRESS,
+                    "Connection already in progress"
+                )
             }
         }
 
-
+        val shouldAutoConnect = autoConnect ?: false
+        if (shouldAutoConnect) {
+            autoConnectDevices.add(deviceId)
+        } else {
+            autoConnectDevices.remove(deviceId)
+        }
         val remoteDevice = bluetoothManager.adapter.getRemoteDevice(deviceId)
         val gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             remoteDevice.connectGatt(
                 context,
-                false,
+                shouldAutoConnect,
                 this,
                 BluetoothDevice.TRANSPORT_LE
             )
         } else {
-            remoteDevice.connectGatt(context, false, this)
+            remoteDevice.connectGatt(context, shouldAutoConnect, this)
         }
         gatt.saveCacheIfNeeded()
     }
 
     override fun disconnect(deviceId: String) {
-        cleanConnection(deviceId.toBluetoothGatt())
+        autoConnectDevices.remove(deviceId)
+        val gatt = deviceId.findGatt()
+        if (gatt == null) {
+            cleanUpConnection(deviceId)
+            mainThreadHandler?.post {
+                callbackChannel?.onConnectionChanged(deviceId, false, null) {}
+            }
+        } else {
+            cleanConnection(gatt)
+        }
     }
 
-    override fun getConnectionState(deviceId: String): Long {
-        val connectionState = bluetoothManager.getConnectionState(
-            bluetoothManager.adapter.getRemoteDevice(deviceId),
-            BluetoothProfile.GATT
-        )
+    override fun getConnectionState(deviceId: String): BleConnectionState {
+        try {
+            val connectionState = bluetoothManager.getConnectionState(
+                bluetoothManager.adapter.getRemoteDevice(deviceId),
+                BluetoothProfile.GATT
+            )
+            return if (deviceId.isKnownGatt() || connectionState == BluetoothGatt.STATE_DISCONNECTED || connectionState == BluetoothGatt.STATE_DISCONNECTING) {
+                connectionState.toBleConnectionState()
+            } else {
+                // Might be connected with device, but not with app
+                UniversalBleLogger.logError("Device might be connected but not known to this app")
+                BleConnectionState.DISCONNECTED
+            }
+        } catch (_: Exception) {
+            return BleConnectionState.DISCONNECTED
+        }
+    }
 
-        return if (deviceId.isKnownGatt() || connectionState == BluetoothGatt.STATE_DISCONNECTED || connectionState == BluetoothGatt.STATE_DISCONNECTING) {
-            connectionState.toBleConnectionState().value
-        } else {
-            // Might be connected with device, but not with app
-            Log.e(TAG, "Device might be connected but not known to this app")
-            BleConnectionState.Disconnected.value
+    override fun setLogLevel(logLevel: BleLogLevel) {
+        UniversalBleLogger.setLogLevel(logLevel)
+    }
+
+    override fun hasBluetoothAdvertisePermission(): Boolean {
+        return permissionHandler?.hasBluetoothAdvertisePermission() ?: false
+    }
+
+    override fun requestBluetoothAdvertisePermission(callback: (Result<Boolean>) -> Unit) {
+        val handler = permissionHandler
+        if (handler == null) {
+            callback(
+                Result.failure(
+                    createFlutterError(
+                        UniversalBleErrorCode.FAILED,
+                        "PermissionHandler is not initialized",
+                    ),
+                ),
+            )
+            return
+        }
+        handler.requestBluetoothAdvertisePermission(callback)
+    }
+
+    override fun readRssi(deviceId: String, callback: (Result<Long>) -> Unit) {
+        try {
+            val gatt = deviceId.toBluetoothGatt()
+            if (gatt.readRemoteRssi()) {
+                rssiResultFutureList.add(RssiResultFuture(deviceId, callback))
+            } else {
+                callback(
+                    Result.failure(
+                        createFlutterError(
+                            UniversalBleErrorCode.FAILED,
+                            "Failed to read RSSI"
+                        )
+                    )
+                )
+            }
+        } catch (e: FlutterError) {
+            callback(Result.failure(e))
+        }
+    }
+
+    override fun onReadRemoteRssi(gatt: BluetoothGatt?, rssi: Int, status: Int) {
+        val deviceId = gatt?.device?.address ?: return
+        rssiResultFutureList.removeAll {
+            if (it.deviceId == deviceId) {
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    it.result(Result.success(rssi.toLong()))
+                } else {
+                    it.result(
+                        Result.failure(
+                            createFlutterError(
+                                UniversalBleErrorCode.FAILED,
+                                "Failed to read RSSI"
+                            )
+                        )
+                    )
+                }
+                true
+            } else {
+                false
+            }
         }
     }
 
     override fun discoverServices(
         deviceId: String,
+        withDescriptors: Boolean,
         callback: (Result<List<UniversalBleService>>) -> Unit,
     ) {
         try {
             val gatt = deviceId.toBluetoothGatt()
             if (gatt.discoverServices()) {
-                discoverServicesFutureList.add(DiscoverServicesFuture(deviceId, callback))
+                discoverServicesFutureList.add(
+                    DiscoverServicesFuture(
+                        deviceId,
+                        withDescriptors,
+                        callback
+                    )
+                )
             } else {
                 callback(
-                    Result.failure(FlutterError("Failed", "Failed to discover services", null))
+                    Result.failure(
+                        createFlutterError(
+                            UniversalBleErrorCode.FAILED,
+                            "Failed to discover services"
+                        )
+                    )
                 )
             }
         } catch (e: FlutterError) {
@@ -250,29 +405,44 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
 
     override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
         if (status != BluetoothGatt.GATT_SUCCESS) {
-            discoverServicesFutureList.filter { it.deviceId == gatt.device.address }.forEach {
-                discoverServicesFutureList.remove(it)
-                it.result(
-                    Result.failure(FlutterError("Failed", "Failed to discover services", null))
-                )
+            discoverServicesFutureList.removeAll {
+                if (it.deviceId == gatt.device.address) {
+                    it.result(
+                        Result.failure(
+                            createFlutterError(
+                                UniversalBleErrorCode.FAILED,
+                                "Failed to discover services"
+                            )
+                        )
+                    )
+                    true
+                } else {
+                    false
+                }
             }
             return
         }
         setCachedServices(gatt.device.address, gatt.services.map { it.uuid.toString() })
-        val universalBleServices = gatt.services.map { service ->
-            UniversalBleService(
-                uuid = service.uuid.toString(),
-                characteristics = service.characteristics.map {
-                    UniversalBleCharacteristic(
-                        uuid = it.uuid.toString(),
-                        properties = it.getPropertiesList()
+        discoverServicesFutureList.removeAll {
+            if (it.deviceId == gatt.device.address) {
+                it.result(Result.success(gatt.services.map { service ->
+                    UniversalBleService(
+                        uuid = service.uuid.toString(),
+                        characteristics = service.characteristics.map { char ->
+                            UniversalBleCharacteristic(
+                                uuid = char.uuid.toString(),
+                                properties = char.getPropertiesList(),
+                                descriptors = if (it.withDescriptors) char.descriptors.map { descriptor ->
+                                    UniversalBleDescriptor(descriptor.uuid.toString())
+                                } else listOf()
+                            )
+                        }
                     )
-                }
-            )
-        }
-        discoverServicesFutureList.filter { it.deviceId == gatt.device.address }.forEach {
-            discoverServicesFutureList.remove(it)
-            it.result(Result.success(universalBleServices))
+                }))
+                true
+            } else {
+                false
+            }
         }
     }
 
@@ -281,28 +451,33 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
         deviceId: String,
         service: String,
         characteristic: String,
-        bleInputProperty: Long,
+        bleInputProperty: BleInputProperty,
         callback: (Result<Unit>) -> Unit,
     ) {
         try {
+            UniversalBleLogger.logDebug("SET_NOTIFY -> $deviceId $service $characteristic input=$bleInputProperty")
             val gatt = deviceId.toBluetoothGatt()
             val gattCharacteristic: BluetoothGattCharacteristic? =
                 gatt.getCharacteristic(service, characteristic)
 
             if (gattCharacteristic == null) {
-                callback(subscriptionFailedError("characteristic not found"))
+                callback(
+                    Result.failure(
+                        createFlutterError(
+                            UniversalBleErrorCode.CHARACTERISTIC_NOT_FOUND,
+                            "characteristic not found"
+                        )
+                    )
+                )
                 return
             }
 
             val descriptor: BluetoothGattDescriptor? =
                 gattCharacteristic.getDescriptor(ccdCharacteristic)
 
-            val bleInputPropertyEnum: BleInputProperty =
-                BleInputProperty.values().first { it.value == bleInputProperty }
-
-            val (value, enable) = when (bleInputPropertyEnum) {
-                BleInputProperty.Notification -> BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE to true
-                BleInputProperty.Indication -> BluetoothGattDescriptor.ENABLE_INDICATION_VALUE to true
+            val (value, enable) = when (bleInputProperty) {
+                BleInputProperty.NOTIFICATION -> BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE to true
+                BleInputProperty.INDICATION -> BluetoothGattDescriptor.ENABLE_INDICATION_VALUE to true
                 else -> BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE to false
             }
 
@@ -310,19 +485,35 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
                 // Some devices do not need CCCD to update
                 @Suppress("DEPRECATION")
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    if (gatt.writeDescriptor(descriptor, value) != BluetoothStatusCodes.SUCCESS) {
-                        callback(subscriptionFailedError("Failed to update descriptor"))
+                    val status = gatt.writeDescriptor(descriptor, value)
+                    if (status != BluetoothStatusCodes.SUCCESS) {
+                        callback(
+                            Result.failure(
+                                createFlutterError(
+                                    status.parseBluetoothStatusCodeError()
+                                        ?: UniversalBleErrorCode.FAILED,
+                                    "Failed to update descriptor"
+                                )
+                            )
+                        )
                         return
                     }
                 } else {
                     descriptor.value = value
                     if (!gatt.writeDescriptor(descriptor)) {
-                        callback(subscriptionFailedError("Failed to update descriptor"))
+                        callback(
+                            Result.failure(
+                                createFlutterError(
+                                    UniversalBleErrorCode.FAILED,
+                                    "Failed to update descriptor"
+                                )
+                            )
+                        )
                         return
                     }
                 }
             } else {
-                Log.d("UniversalBle", "CCCD Descriptor not found")
+                UniversalBleLogger.logDebug("CCCD Descriptor not found")
             }
 
             if (gatt.setCharacteristicNotification(gattCharacteristic, enable)) {
@@ -339,12 +530,27 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
                     callback(Result.success(Unit))
                 }
             } else {
-                callback(subscriptionFailedError())
+                callback(
+                    Result.failure(
+                        createFlutterError(
+                            UniversalBleErrorCode.FAILED,
+                            "Failed to update subscription state"
+                        )
+                    )
+                )
             }
         } catch (e: FlutterError) {
             callback(Result.failure(e))
         } catch (e: Exception) {
-            callback(subscriptionFailedError(e.toString()))
+            callback(
+                Result.failure(
+                    createFlutterError(
+                        UniversalBleErrorCode.FAILED,
+                        "Failed to update subscription state",
+                        e.toString()
+                    )
+                )
+            )
         }
     }
 
@@ -355,17 +561,28 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
         callback: (Result<ByteArray>) -> Unit,
     ) {
         try {
+            UniversalBleLogger.logDebug("READ -> $deviceId $service $characteristic")
             val gatt = deviceId.toBluetoothGatt()
             val gattCharacteristic = gatt.getCharacteristic(service, characteristic)
             if (gattCharacteristic == null) {
                 callback(
-                    Result.failure(FlutterError("IllegalArgument", "Unknown characteristic", null))
+                    Result.failure(
+                        createFlutterError(
+                            UniversalBleErrorCode.CHARACTERISTIC_NOT_FOUND,
+                            "Unknown characteristic"
+                        )
+                    )
                 )
                 return
             }
             if (!gatt.readCharacteristic(gattCharacteristic)) {
                 callback(
-                    Result.failure(unknownCharacteristicError(characteristic))
+                    Result.failure(
+                        createFlutterError(
+                            UniversalBleErrorCode.CHARACTERISTIC_NOT_FOUND,
+                            "$characteristic not found",
+                        )
+                    )
                 )
                 return
             }
@@ -383,8 +600,8 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
         } catch (e: Exception) {
             callback(
                 Result.failure(
-                    FlutterError(
-                        "Failed",
+                    createFlutterError(
+                        UniversalBleErrorCode.READ_FAILED,
                         "Failed to read value",
                         e.toString()
                     )
@@ -399,26 +616,31 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
         value: ByteArray,
         status: Int,
     ) {
-        readResultFutureList.filter {
-            it.deviceId == gatt.device.address &&
-                    it.characteristicId == characteristic.uuid.toString() &&
-                    it.serviceId == characteristic.service.uuid.toString()
-        }.forEach {
-            readResultFutureList.remove(it)
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                it.result(Result.success(value))
-            } else {
-                it.result(
-                    Result.failure(
-                        FlutterError(
-                            status.toString(),
-                            "Failed to read: (${status.parseGattErrorCode()})",
-                            null,
+        readResultFutureList.removeAll {
+            if (it.deviceId == gatt.device.address &&
+                it.characteristicId == characteristic.uuid.toString() &&
+                it.serviceId == characteristic.service.uuid.toString()
+            ) {
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    it.result(Result.success(value))
+                } else {
+                    UniversalBleLogger.logError(
+                        "READ_FAILED <- ${gatt.device.address} ${characteristic.uuid} status=$status"
+                    )
+                    it.result(
+                        Result.failure(
+                            createFlutterError(
+                                gattStatusToUniversalBleErrorCode(status),
+                                "Failed to read",
+                                status.toString()
+                            )
                         )
                     )
-                )
+                }
+                true
+            } else {
+                false
             }
-
         }
     }
 
@@ -427,40 +649,46 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
         service: String,
         characteristic: String,
         value: ByteArray,
-        bleOutputProperty: Long,
+        bleOutputProperty: BleOutputProperty,
         callback: (Result<Unit>) -> Unit,
     ) {
         try {
+            UniversalBleLogger.logDebug("WRITE -> $deviceId $service $characteristic len=${value.size} property=$bleOutputProperty")
             val gatt = deviceId.toBluetoothGatt()
             val gattCharacteristic = gatt.getCharacteristic(service, characteristic)
             if (gattCharacteristic == null) {
-                callback(Result.failure(unknownCharacteristicError(characteristic)))
+                callback(
+                    Result.failure(
+                        createFlutterError(
+                            UniversalBleErrorCode.CHARACTERISTIC_NOT_FOUND,
+                            "$characteristic not found",
+                        )
+                    )
+                )
                 return
             }
 
             var writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-            if (bleOutputProperty == BleOutputProperty.withResponse.value) {
+            if (bleOutputProperty == BleOutputProperty.WITH_RESPONSE) {
                 if (gattCharacteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE == 0) {
                     callback(
                         Result.failure(
-                            FlutterError(
-                                "IllegalArgument",
-                                "Characteristic does not support write withResponse",
-                                null
+                            createFlutterError(
+                                UniversalBleErrorCode.CHARACTERISTIC_DOES_NOT_SUPPORT_WRITE,
+                                "Characteristic does not support write withResponse"
                             )
                         )
                     )
                     return
                 }
                 writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-            } else if (bleOutputProperty == BleOutputProperty.withoutResponse.value) {
+            } else if (bleOutputProperty == BleOutputProperty.WITHOUT_RESPONSE) {
                 if (gattCharacteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE == 0) {
                     callback(
                         Result.failure(
-                            FlutterError(
-                                "IllegalArgument",
-                                "Characteristic does not support write withoutResponse",
-                                null
+                            createFlutterError(
+                                UniversalBleErrorCode.CHARACTERISTIC_DOES_NOT_SUPPORT_WRITE_WITHOUT_RESPONSE,
+                                "Characteristic does not support write withoutResponse"
                             )
                         )
                     )
@@ -495,10 +723,10 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
                 writeResultFutureList.remove(writeFuture)
                 callback(
                     Result.failure(
-                        FlutterError(
-                            "WriteError",
-                            "Failed to write: ${result.parseGattErrorCode()}",
-                            null
+                        createFlutterError(
+                            gattStatusToUniversalBleErrorCode(result),
+                            "Failed to write",
+                            result.toString()
                         )
                     )
                 )
@@ -513,30 +741,37 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
         characteristic: BluetoothGattCharacteristic,
         status: Int,
     ) {
-        writeResultFutureList.filter {
-            it.deviceId == gatt?.device?.address &&
-                    it.characteristicId == characteristic.uuid.toString() &&
-                    it.serviceId == characteristic.service.uuid.toString()
-        }.forEach {
-            writeResultFutureList.remove(it)
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                it.result(Result.success(Unit))
-            } else {
-                it.result(
-                    Result.failure(
-                        FlutterError(
-                            status.toString(),
-                            "Failed to write: (${status.parseGattErrorCode()})",
-                            null,
+        writeResultFutureList.removeAll {
+            if (it.deviceId == gatt?.device?.address &&
+                it.characteristicId == characteristic.uuid.toString() &&
+                it.serviceId == characteristic.service.uuid.toString()
+            ) {
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    it.result(Result.success(Unit))
+                } else {
+                    UniversalBleLogger.logError(
+                        "WRITE_FAILED <- ${gatt?.device?.address} ${characteristic.uuid} status=$status"
+                    )
+                    it.result(
+                        Result.failure(
+                            createFlutterError(
+                                gattStatusToUniversalBleErrorCode(status),
+                                "Failed to write",
+                                status.toString()
+                            )
                         )
                     )
-                )
+                }
+                true
+            } else {
+                false
             }
         }
     }
 
 
     override fun requestMtu(deviceId: String, expectedMtu: Long, callback: (Result<Long>) -> Unit) {
+        UniversalBleLogger.logDebug("REQUEST_MTU -> $deviceId expected=$expectedMtu")
         try {
             val gatt = deviceId.toBluetoothGatt()
             gatt.requestMtu(expectedMtu.toInt())
@@ -546,14 +781,65 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
         }
     }
 
+    override fun requestConnectionPriority(
+        deviceId: String,
+        priority: BleConnectionPriority,
+        callback: (Result<Unit>) -> Unit,
+    ) {
+        try {
+            val gatt = deviceId.toBluetoothGatt()
+            val androidPriority = when (priority) {
+                BleConnectionPriority.BALANCED -> BluetoothGatt.CONNECTION_PRIORITY_BALANCED
+                BleConnectionPriority.HIGH_PERFORMANCE -> BluetoothGatt.CONNECTION_PRIORITY_HIGH
+                BleConnectionPriority.LOW_POWER -> BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER
+            }
+            val success = gatt.requestConnectionPriority(androidPriority)
+            if (success) {
+                callback(Result.success(Unit))
+            } else {
+                callback(
+                    Result.failure(
+                        createFlutterError(
+                            UniversalBleErrorCode.FAILED,
+                            "requestConnectionPriority returned false",
+                        ),
+                    ),
+                )
+            }
+        } catch (e: FlutterError) {
+            callback(Result.failure(e))
+        } catch (e: Exception) {
+            callback(
+                Result.failure(
+                    createFlutterError(
+                        UniversalBleErrorCode.FAILED,
+                        "requestConnectionPriority failed",
+                        e.toString()
+                    )
+                )
+            )
+        }
+    }
+
     override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
         val deviceId = gatt?.device?.address ?: return
-        mtuResultFutureList.filter { it.deviceId == deviceId }.forEach {
-            mtuResultFutureList.remove(it)
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                it.result(Result.success(mtu.toLong()))
+        mtuResultFutureList.removeAll {
+            if (it.deviceId == deviceId) {
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    it.result(Result.success(mtu.toLong()))
+                } else {
+                    it.result(
+                        Result.failure(
+                            createFlutterError(
+                                UniversalBleErrorCode.FAILED,
+                                "Failed to change MTU"
+                            )
+                        )
+                    )
+                }
+                true
             } else {
-                it.result(Result.failure(FlutterError("Failed to change MTU", null, null)))
+                false
             }
         }
     }
@@ -561,7 +847,7 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
     override fun isPaired(deviceId: String, callback: (Result<Boolean>) -> Unit) {
         val remoteDevice: BluetoothDevice =
             bluetoothManager.adapter.getRemoteDevice(deviceId)
-        callback(Result.success(remoteDevice.bondState == BOND_BONDED))
+        callback(Result.success(remoteDevice.isBonded()))
     }
 
     override fun pair(deviceId: String, callback: (Result<Boolean>) -> Unit) {
@@ -570,7 +856,7 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
             val pendingFuture = pairResultFutures.remove(deviceId)
 
             // If already paired, return and complete pending futures
-            if (remoteDevice.bondState == BOND_BONDED) {
+            if (remoteDevice.isBonded()) {
                 pendingFuture?.let { it(Result.success(true)) }
                 callback(Result.success(true))
                 return
@@ -580,10 +866,9 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
             if (pendingFuture != null) {
                 callback(
                     Result.failure(
-                        FlutterError(
-                            "InProgress",
-                            "Pairing already in progress",
-                            null
+                        createFlutterError(
+                            UniversalBleErrorCode.OPERATION_IN_PROGRESS,
+                            "Pairing already in progress"
                         )
                     )
                 )
@@ -594,12 +879,19 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
             if (remoteDevice.createBond()) {
                 pairResultFutures[deviceId] = callback
             } else {
-                callback(Result.failure(FlutterError("Failed", "Failed to pair", null)))
+                callback(
+                    Result.failure(
+                        createFlutterError(
+                            UniversalBleErrorCode.PAIRING_FAILED,
+                            "Failed to pair"
+                        )
+                    )
+                )
             }
         } catch (e: Exception) {
             callback(
                 Result.failure(
-                    FlutterError("Failed", e.toString(), null)
+                    createFlutterError(UniversalBleErrorCode.FAILED, e.toString())
                 )
             )
         }
@@ -609,7 +901,7 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
     override fun unPair(deviceId: String) {
         val remoteDevice: BluetoothDevice =
             bluetoothManager.adapter.getRemoteDevice(deviceId)
-        if (remoteDevice.bondState == BOND_BONDED) {
+        if (remoteDevice.isBonded()) {
             remoteDevice.removeBond()
         }
     }
@@ -629,9 +921,11 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
                     UniversalBleScanResult(
                         name = it.name,
                         deviceId = it.address,
-                        isPaired = it.bondState == BOND_BONDED,
+                        isPaired = it.isBonded(),
                         manufacturerDataList = null,
+                        serviceData = null,
                         rssi = null,
+                        timestamp = System.currentTimeMillis()
                     )
                 }
             )
@@ -664,7 +958,7 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
         try {
             val timeout = (devices.size * 2).toLong()
             latch.await(timeout, TimeUnit.SECONDS)
-        } catch (e: InterruptedException) {
+        } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
         }
 
@@ -698,7 +992,10 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
 
             if (gatt.discoverServices()) {
                 discoverServicesFutureList.add(
-                    DiscoverServicesFuture(device.address) { uuids: Result<List<UniversalBleService>> ->
+                    DiscoverServicesFuture(
+                        device.address,
+                        false
+                    ) { uuids: Result<List<UniversalBleService>> ->
                         if (uuids.isSuccess) {
                             updateCallback(uuids.getOrNull()?.map { it.uuid })
                         } else {
@@ -746,50 +1043,65 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
         }
     }
 
-    private fun cleanConnection(gatt: BluetoothGatt) {
-        gatt.removeCache()
-        gatt.disconnect()
-
+    private fun cleanUpConnection(deviceId: String) {
+        val deviceDisconnectedError: FlutterError = createFlutterError(
+            UniversalBleErrorCode.DEVICE_DISCONNECTED,
+            "Device Disconnected",
+        )
         readResultFutureList.removeAll {
-            if (it.deviceId == gatt.device.address) {
-                it.result(Result.failure(DeviceDisconnectedError))
+            if (it.deviceId == deviceId) {
+                it.result(Result.failure(deviceDisconnectedError))
                 true
             } else {
                 false
             }
         }
         writeResultFutureList.removeAll {
-            if (it.deviceId == gatt.device.address) {
-                it.result(Result.failure(DeviceDisconnectedError))
+            if (it.deviceId == deviceId) {
+                it.result(Result.failure(deviceDisconnectedError))
                 true
             } else {
                 false
             }
         }
         subscriptionResultFutureList.removeAll {
-            if (it.deviceId == gatt.device.address) {
-                it.result(Result.failure(DeviceDisconnectedError))
+            if (it.deviceId == deviceId) {
+                it.result(Result.failure(deviceDisconnectedError))
                 true
             } else {
                 false
             }
         }
         mtuResultFutureList.removeAll {
-            if (it.deviceId == gatt.device.address) {
-                it.result(Result.failure(DeviceDisconnectedError))
+            if (it.deviceId == deviceId) {
+                it.result(Result.failure(deviceDisconnectedError))
                 true
             } else {
                 false
             }
         }
         discoverServicesFutureList.removeAll {
-            if (it.deviceId == gatt.device.address) {
-                it.result(Result.failure(DeviceDisconnectedError))
+            if (it.deviceId == deviceId) {
+                it.result(Result.failure(deviceDisconnectedError))
                 true
             } else {
                 false
             }
         }
+        rssiResultFutureList.removeAll {
+            if (it.deviceId == deviceId) {
+                it.result(Result.failure(deviceDisconnectedError))
+                true
+            } else {
+                false
+            }
+        }
+    }
+
+    private fun cleanConnection(gatt: BluetoothGatt) {
+        gatt.removeCache()
+        gatt.disconnect()
+        cleanUpConnection(gatt.device.address)
     }
 
     private fun onBondStateUpdate(deviceId: String, bonded: Boolean, error: String? = null) {
@@ -806,41 +1118,33 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
                 mainThreadHandler?.post {
                     callbackChannel?.onAvailabilityChanged(
                         bluetoothManager.adapter?.state?.toAvailabilityState()
-                            ?: AvailabilityState.Unknown.value
+                            ?: AvailabilityState.UNKNOWN
                     ) {}
                 }
             } else if (intent.action == BluetoothDevice.ACTION_BOND_STATE_CHANGED) {
-                val device: BluetoothDevice? =
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        intent.getParcelableExtra(
-                            BluetoothDevice.EXTRA_DEVICE,
-                            BluetoothDevice::class.java
-                        )
-                    } else {
-                        @Suppress("DEPRECATION")
-                        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
-                    }
-                if (device == null) {
-                    Log.e(TAG, "No device found in ACTION_BOND_STATE_CHANGED intent")
+                val bondStateChange = intent.getBondStateChange()
+                if (bondStateChange == null) {
+                    UniversalBleLogger.logError("No device found in ACTION_BOND_STATE_CHANGED intent")
                     return
                 }
+                peripheralPlugin.onBondStateChanged(bondStateChange)
                 // get pairing failed error
-                when (intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)) {
+                when (bondStateChange.state) {
                     BluetoothDevice.BOND_BONDING -> {
-                        Log.v(TAG, "${device.address} BOND_BONDING")
+                        UniversalBleLogger.logVerbose("${bondStateChange.device.address} BOND_BONDING")
                     }
 
                     BluetoothDevice.BOND_BONDED -> {
-                        onBondStateUpdate(device.address, true)
+                        onBondStateUpdate(bondStateChange.device.address, true)
                     }
 
                     BluetoothDevice.ERROR -> {
-                        onBondStateUpdate(device.address, false, "Failed to Pair")
+                        onBondStateUpdate(bondStateChange.device.address, false, "Failed to Pair")
                     }
 
                     BluetoothDevice.BOND_NONE -> {
-                        Log.e(TAG, "${device.address} BOND_NONE")
-                        onBondStateUpdate(device.address, false)
+                        UniversalBleLogger.logError("${bondStateChange.device.address} BOND_NONE")
+                        onBondStateUpdate(bondStateChange.device.address, false)
                     }
                 }
             }
@@ -850,12 +1154,12 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanFailed(errorCode: Int) {
-            Log.e(TAG, "OnScanFailed: ${errorCode.parseScanErrorMessage()}")
+            UniversalBleLogger.logError("OnScanFailed: ${errorCode.parseScanErrorMessage()}")
         }
 
         override fun onScanResult(callbackType: Int, result: ScanResult) {
 
-            // Log.v(TAG, "onScanResult: $result")
+            // UniversalBleLogger.logVerbose("onScanResult: $result")
             var serviceUuids: Array<UUID> = arrayOf()
             result.device.uuids?.forEach {
                 serviceUuids += it.uuid
@@ -868,6 +1172,7 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
 
             val name = result.device.name
             val manufacturerDataList = result.manufacturerDataList
+            val serviceData = result.serviceData
 
             if (!universalBleFilterUtil.filterDevice(
                     name,
@@ -882,24 +1187,29 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
                     UniversalBleScanResult(
                         name = result.device.name,
                         deviceId = result.device.address,
-                        isPaired = result.device.bondState == BOND_BONDED,
+                        isPaired = result.device.isBonded(),
                         manufacturerDataList = manufacturerDataList,
+                        serviceData = serviceData,
                         rssi = result.rssi.toLong(),
-                        services = serviceUuids.map { it.toString() }.toList()
+                        services = serviceUuids.map { it.toString() }.toList(),
+                        timestamp = System.currentTimeMillis()
                     )
                 ) {}
             }
         }
 
         override fun onBatchScanResults(results: MutableList<ScanResult>?) {
-            Log.v(TAG, "onBatchScanResults: $results")
+            UniversalBleLogger.logVerbose("onBatchScanResults: $results")
         }
     }
 
 
-    override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
-        Log.d(
-            TAG,
+    override fun onConnectionStateChange(
+        gatt: BluetoothGatt,
+        status: Int,
+        newState: Int,
+    ) {
+        UniversalBleLogger.logDebug(
             "onConnectionStateChange-> Status: $status ${status.parseHciErrorCode()}, NewState: $newState"
         )
 
@@ -910,14 +1220,27 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
                 ) {}
             }
         } else if (newState == BluetoothGatt.STATE_DISCONNECTED) {
-            cleanConnection(gatt)
+            val deviceId = gatt.device.address
+            val shouldAutoConnect = autoConnectDevices.contains(deviceId)
+
+            // Always clean up internal state (futures, etc.)
+            cleanUpConnection(deviceId)
+
+            // Send connection changed callback
             mainThreadHandler?.post {
                 callbackChannel?.onConnectionChanged(
-                    gatt.device.address, false, status.parseHciErrorCode()
+                    deviceId, false, status.parseHciErrorCode()
                 ) {}
             }
-            Log.d(TAG, "Closing gatt for ${gatt.device.name}")
-            gatt.close()
+
+            if (!shouldAutoConnect) {
+                // Only close GATT resources when autoConnect is disabled
+                gatt.removeCache()
+                gatt.disconnect()
+                UniversalBleLogger.logDebug("Closing gatt for ${gatt.device.name}")
+                gatt.close()
+            }
+            // When autoConnect is enabled, keep GATT open for Android to reconnect
         }
     }
 
@@ -926,11 +1249,15 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
         characteristic: BluetoothGattCharacteristic,
         value: ByteArray,
     ) {
+        UniversalBleLogger.logVerbose(
+            "NOTIFY <- ${gatt.device.address} ${characteristic.uuid} len=${value.size}"
+        )
         mainThreadHandler?.post {
             callbackChannel?.onValueChanged(
                 deviceIdArg = gatt.device.address,
                 characteristicIdArg = characteristic.uuid.toString(),
-                valueArg = value
+                valueArg = value,
+                timestampArg = System.currentTimeMillis()
             ) {}
         }
     }
@@ -944,7 +1271,7 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
         if (descriptor?.uuid.toString() == ccdCharacteristic.toString()) {
             val char: String? = descriptor?.characteristic?.uuid?.toString()
             val service: String? = descriptor?.characteristic?.service?.uuid?.toString()
-            val deviceId: String? = gatt?.device?.address;
+            val deviceId: String? = gatt?.device?.address
             if (deviceId != null && char != null && service != null) {
                 updateSubscriptionState(deviceId, char, service, status)
             }
@@ -957,31 +1284,33 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
         service: String,
         status: Int,
     ) {
-        subscriptionResultFutureList.filter {
-            it.deviceId == deviceId &&
-                    it.characteristicId == characteristic &&
-                    it.serviceId == service
-        }.forEach {
-            subscriptionResultFutureList.remove(it)
-            val error: String? = status.parseGattErrorCode()
-            if (error != null) {
-                it.result(
-                    Result.failure(
-                        FlutterError(
-                            status.toString(),
-                            "Failed to update subscription state: $error",
-                            null,
+        subscriptionResultFutureList.removeAll {
+            if (it.deviceId == deviceId &&
+                it.characteristicId == characteristic &&
+                it.serviceId == service
+            ) {
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    it.result(
+                        Result.failure(
+                            createFlutterError(
+                                gattStatusToUniversalBleErrorCode(status),
+                                "Failed to update subscription state",
+                                status.toString()
+                            )
                         )
                     )
-                )
+                } else {
+                    it.result(Result.success(Unit))
+                }
+                true
             } else {
-                it.result(Result.success(Unit))
+                false
             }
         }
     }
 
     private fun isBluetoothAvailable(): Boolean {
-        return bluetoothManager.adapter.isEnabled
+        return bluetoothManager.isBluetoothEnabled()
     }
 
     private fun setCachedServices(deviceId: String, services: List<String>) {
@@ -989,7 +1318,7 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
             "com.navideck.universal_ble.services",
             Context.MODE_PRIVATE
         )
-        cachedServicesSharedPref.edit().putStringSet(deviceId, services.toSet()).apply()
+        cachedServicesSharedPref.edit { putStringSet(deviceId, services.toSet()) }
         cachedServicesMap[deviceId] = services
     }
 
@@ -1038,13 +1367,34 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
+        peripheralPlugin.attachActivity(binding.activity)
         binding.addActivityResultListener(this)
+        binding.addRequestPermissionsResultListener(this)
+        permissionHandler?.attachActivity(binding.activity)
     }
 
     override fun onDetachedFromActivity() {
         activity = null
+        peripheralPlugin.attachActivity(null)
+        permissionHandler?.attachActivity(null)
     }
 
-    override fun onDetachedFromActivityForConfigChanges() {}
-    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {}
+    override fun onDetachedFromActivityForConfigChanges() {
+        // Activity will be reattached, keep the reference
+    }
+
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        activity = binding.activity
+        peripheralPlugin.attachActivity(binding.activity)
+        permissionHandler?.attachActivity(binding.activity)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ): Boolean {
+        return permissionHandler?.handlePermissionResult(requestCode, permissions, grantResults)
+            ?: false
+    }
 }

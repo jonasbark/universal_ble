@@ -24,6 +24,14 @@ class UniversalBle {
     _bleCommandQueue.timeout = duration;
   }
 
+  /// Set log level for both Dart and native implementations.
+  /// Only effective in debug builds.
+  static Future<void> setLogLevel(BleLogLevel logLevel) async {
+    if (!kDebugMode) return;
+    UniversalLogger.setLogLevel(logLevel);
+    await _platform.setLogLevel(logLevel);
+  }
+
   /// Set how commands will be executed. By default, all commands are executed in a global queue (`QueueType.global`),
   /// with each command waiting for the previous one to finish.
   ///
@@ -48,8 +56,9 @@ class UniversalBle {
 
   /// Characteristic value stream
   static Stream<Uint8List> characteristicValueStream(
-          String deviceId, String characteristicId) =>
-      _platform.characteristicValueStream(deviceId, characteristicId);
+    String deviceId,
+    String characteristicId,
+  ) => _platform.characteristicValueStream(deviceId, characteristicId);
 
   /// Pairing state stream
   static Stream<bool> pairingStateStream(String deviceId) =>
@@ -60,6 +69,32 @@ class UniversalBle {
   static Future<AvailabilityState> getBluetoothAvailabilityState() async {
     return await _bleCommandQueue.queueCommand(
       () => _platform.getBluetoothAvailabilityState(),
+    );
+  }
+
+  /// Check if has permissions.
+  /// [withAndroidFineLocation] is used to check fine location permission on Android 12+ (API 31+).
+  /// On Android lower than 12, this method will check location permission regardless of the [withAndroidFineLocation] value.
+  /// `Windows`, `Linux` and `Web` will always return true.
+  static Future<bool> hasPermissions({
+    bool withAndroidFineLocation = false,
+  }) async {
+    return _platform.hasPermissions(
+      withAndroidFineLocation: withAndroidFineLocation,
+    );
+  }
+
+  /// Request permissions.
+  /// if all permissions are already granted or granted by user, this method will succeed.
+  /// it will throw exception if permissions are denied by user.
+  /// [withAndroidFineLocation] is used to request fine location permission on Android 12+ (API 31+).
+  /// on Android lower than 12, this method will request location permission regardless of the [withAndroidFineLocation] value.
+  /// `Windows`, `Linux` and `Web` will always succeed.
+  static Future<void> requestPermissions({
+    bool withAndroidFineLocation = false,
+  }) async {
+    return _platform.requestPermissions(
+      withAndroidFineLocation: withAndroidFineLocation,
     );
   }
 
@@ -88,75 +123,105 @@ class UniversalBle {
     );
   }
 
+  /// Check if currently scanning for devices.
+  /// Returns `true` if scanning is active, `false` otherwise.
+  static Future<bool> isScanning() async {
+    return await _bleCommandQueue.queueCommand(() => _platform.isScanning());
+  }
+
   /// Connect to a device.
   /// It is advised to stop scanning before connecting.
   /// It throws error if device connection fails.
   /// Default connection timeout is 60 sec.
+  ///
+  /// [autoConnect] enables automatic reconnection when the device becomes available.
+  /// Default value is `false`.
+  /// Ignored on `Windows`, `Linux` and `Web`.
+  ///
+  /// Call [disconnect] to prevent auto-reconnect even while a device is disconnected.
+  ///
   /// Can throw `ConnectionException` or `PlatformException`.
   static Future<void> connect(
     String deviceId, {
     Duration? timeout,
+    bool autoConnect = false,
   }) async {
     timeout ??= const Duration(seconds: 60);
-    StreamSubscription? connectionSubscription;
-    Completer<bool> completer = Completer();
+    Completer<bool> completer = _connectionEventCompleter(
+      deviceId,
+      timeout: timeout,
+    );
 
-    void handleError(dynamic error) {
-      if (completer.isCompleted) return;
-      connectionSubscription?.cancel();
-      completer.completeError(ConnectionException(error));
-    }
+    _platform
+        .connect(deviceId, connectionTimeout: timeout, autoConnect: autoConnect)
+        .catchError((error) {
+          if (completer.isCompleted) return;
+          completer.completeError(ConnectionException(error));
+        });
 
-    try {
-      connectionSubscription = _platform
-          .bleConnectionUpdateStreamController.stream
-          .where((e) => e.deviceId == deviceId)
-          .listen(
-        (e) {
-          if (e.error != null) {
-            handleError(e.error);
-          } else {
-            if (!completer.isCompleted) {
-              completer.complete(e.isConnected);
-            }
-          }
-        },
-        onError: handleError,
-        cancelOnError: true,
-      );
-
-      _platform
-          .connect(deviceId, connectionTimeout: timeout)
-          .catchError(handleError);
-
-      if (!await completer.future.timeout(timeout)) {
-        throw ConnectionException("Failed to connect");
-      }
-    } finally {
-      connectionSubscription?.cancel();
+    if (!await completer.future.timeout(timeout)) {
+      throw ConnectionException("Failed to connect");
     }
   }
 
   /// Disconnect from a device.
   /// Get notified of connection state changes in [onConnectionChange] listener.
-  static Future<void> disconnect(
-    String deviceId, {
-    Duration? timeout,
-  }) async {
-    return await _bleCommandQueue.queueCommand(
-      () => _platform.disconnect(deviceId),
-      timeout: timeout,
-      deviceId: deviceId,
-    );
+  static Future<void> disconnect(String deviceId, {Duration? timeout}) async {
+    timeout ??= const Duration(seconds: 60);
+    BleConnectionState? connectionState;
+    try {
+      connectionState = await _platform.getConnectionState(deviceId);
+    } catch (e) {
+      UniversalLogger.logError("Get connection state failed: $e");
+    }
+
+    try {
+      Completer<bool> completer = _connectionEventCompleter(
+        deviceId,
+        timeout: timeout,
+      );
+
+      await _bleCommandQueue
+          .queueCommand(
+            () => _platform.disconnect(deviceId),
+            timeout: timeout,
+            deviceId: deviceId,
+          )
+          .catchError((error) {
+            if (completer.isCompleted) return;
+            completer.completeError(ConnectionException(error));
+          });
+
+      if (connectionState == BleConnectionState.disconnected ||
+          connectionState == BleConnectionState.disconnecting) {
+        // Device was already disconnected, but we still called platform disconnect
+        // to prevent auto-reconnect. Update connection state and return.
+        _platform.updateConnection(deviceId, false);
+        UniversalLogger.logInfo(
+          "Device $deviceId already disconnected: $connectionState. Cleanup performed to prevent auto-reconnect.",
+        );
+        return;
+      }
+
+      if (await completer.future.timeout(timeout)) {
+        UniversalLogger.logError(
+          "Device $deviceId is still connected after disconnect attempt",
+        );
+      }
+    } catch (e) {
+      UniversalLogger.logError("Disconnect failed: $e");
+    }
   }
 
   /// Discover services of a device.
+  /// Set [withDescriptors] to `true` to discover characteristics with descriptors.
   static Future<List<BleService>> discoverServices(
     String deviceId, {
+    bool withDescriptors = false,
     Duration? timeout,
   }) async {
     return await _bleCommandQueue.queueCommand(
-      () => _platform.discoverServices(deviceId),
+      () => _platform.discoverServices(deviceId, withDescriptors),
       timeout: timeout,
       deviceId: deviceId,
     );
@@ -235,7 +300,7 @@ class UniversalBle {
   }
 
   /// Write a characteristic value.
-  /// To write a characteristic value without response, set [withoutResponse] to [true].
+  /// To write a characteristic value without response, set [withoutResponse] to `true`.
   static Future<void> write(
     String deviceId,
     String service,
@@ -259,9 +324,21 @@ class UniversalBle {
     );
   }
 
-  /// Request MTU value.
-  /// It will **attempt** to set the MTU (Maximum Transmission Unit) but it is not guaranteed to succeed due to platform limitations.
-  /// It will always return the current MTU.
+  /// Requests an MTU (Maximum Transmission Unit) value for the connection.
+  ///
+  /// **⚠️ Note:** Requesting an MTU is a *best-effort* operation. On many platforms
+  /// the final MTU is fully controlled by the OS and remote device. This method
+  /// returns the current/negotiated MTU value, which may differ from `expectedMtu`.
+  ///
+  /// **Platform Limitations:**
+  /// * **iOS/macOS**: MTU is OS-managed; apps cannot request it (~185-517 bytes auto-negotiated)
+  /// * **Android ≤13**: May request once per connection (up to 517), default is 23
+  /// * **Android 14+**: First GATT client drives MTU to 517; subsequent requests ignored
+  /// * **Windows/Linux**: MTU is automatically negotiated; apps can only query it
+  /// * **Web**: Not supported (no API available)
+  ///
+  /// **Best Practices:** Design for default ATT MTU (23 bytes), treat requests as
+  /// opportunistic, and implement fragmentation for larger payloads.
   static Future<int> requestMtu(
     String deviceId,
     int expectedMtu, {
@@ -269,6 +346,49 @@ class UniversalBle {
   }) async {
     return await _bleCommandQueue.queueCommand(
       () => _platform.requestMtu(deviceId, expectedMtu),
+      timeout: timeout,
+      deviceId: deviceId,
+    );
+  }
+
+  /// Requests a connection parameter update for [deviceId].
+  ///
+  /// [priority] controls the BLE connection interval:
+  /// - [BleConnectionPriority.balanced] - default OS behaviour (~30-50 ms interval).
+  /// - [BleConnectionPriority.highPerformance] - low latency, higher power (~7.5-15 ms interval).
+  /// - [BleConnectionPriority.lowPower] - power-optimised (~100-125 ms interval).
+  ///
+  /// Only supported on Android. On all other platforms this throws
+  /// [UniversalBleException] with code [UniversalBleErrorCode.notSupported].
+  ///
+  /// Should be called after a successful connection and MTU negotiation, before
+  /// beginning high-throughput data transfer.
+  static Future<void> requestConnectionPriority(
+    String deviceId,
+    BleConnectionPriority priority, {
+    Duration? timeout,
+  }) async {
+    return await _bleCommandQueue.queueCommand(
+      () => _platform.requestConnectionPriority(deviceId, priority),
+      timeout: timeout,
+      deviceId: deviceId,
+    );
+  }
+
+  /// Read the RSSI value of a connected device.
+  ///
+  /// Returns the current RSSI value in dBm. This value indicates the signal strength
+  /// between the device and the connected peripheral. Lower (more negative) values
+  /// indicate weaker signal, while higher (less negative) values indicate stronger signal.
+  ///
+  /// **Note**: The device must be connected before reading RSSI.
+  ///
+  /// Throws [UniversalBleException] if:
+  /// - The device is not connected
+  /// - Reading RSSI fails
+  static Future<int> readRssi(String deviceId, {Duration? timeout}) async {
+    return await _bleCommandQueue.queueCommand(
+      () => _platform.readRssi(deviceId),
       timeout: timeout,
       deviceId: deviceId,
     );
@@ -351,10 +471,7 @@ class UniversalBle {
 
   /// Unpair a device.
   /// It might throw an error if device is not paired.
-  static Future<void> unpair(
-    String deviceId, {
-    Duration? timeout,
-  }) async {
+  static Future<void> unpair(String deviceId, {Duration? timeout}) async {
     return await _bleCommandQueue.queueCommand(
       () => _platform.unpair(deviceId),
       deviceId: deviceId,
@@ -364,7 +481,7 @@ class UniversalBle {
 
   /// Get connected devices to the system (connected by any app).
   /// Use [withServices] to filter devices by services.
-  /// On `Apple`, [withServices] is required to get any connected devices. If not passed, several [18XX] generic services will be set by default.
+  /// On `Apple`, [withServices] is required to get any connected devices. If not passed, several 18XX generic services will be set by default.
   /// On `Android`, `Linux` and `Windows`, if [withServices] is used, then internally all services will be discovered for each device first (either by connecting or by using cached services).
   /// Not supported on `Web`.
   static Future<List<BleDevice>> getSystemDevices({
@@ -393,9 +510,7 @@ class UniversalBle {
   /// Enable Bluetooth.
   /// It might throw errors if Bluetooth is not available.
   /// Not supported on `Web` and `Apple`.
-  static Future<bool> enableBluetooth({
-    Duration? timeout,
-  }) async {
+  static Future<bool> enableBluetooth({Duration? timeout}) async {
     return await _bleCommandQueue.queueCommand(
       () => _platform.enableBluetooth(),
       timeout: timeout,
@@ -405,9 +520,7 @@ class UniversalBle {
   /// Disable Bluetooth.
   /// It might throw errors if Bluetooth is not available.
   /// Not supported on `Web` and `Apple`.
-  static Future<bool> disableBluetooth({
-    Duration? timeout,
-  }) async {
+  static Future<bool> disableBluetooth({Duration? timeout}) async {
     return await _bleCommandQueue.queueCommand(
       () => _platform.disableBluetooth(),
       timeout: timeout,
@@ -434,14 +547,17 @@ class UniversalBle {
   static set onAvailabilityChange(OnAvailabilityChange? onAvailabilityChange) {
     _platform.onAvailabilityChange = onAvailabilityChange;
     if (onAvailabilityChange != null) {
-      getBluetoothAvailabilityState().then((value) {
-        onAvailabilityChange(value);
-      }).onError((error, stackTrace) => null);
+      getBluetoothAvailabilityState()
+          .then((value) {
+            onAvailabilityChange(value);
+          })
+          .onError((error, stackTrace) => null);
     }
   }
 
   @Deprecated(
-      "Use [subscribeNotifications] or [subscribeIndications] or [unsubscribe] instead")
+    "Use [subscribeNotifications] or [subscribeIndications] or [unsubscribe] instead",
+  )
   static Future<void> setNotifiable(
     String deviceId,
     String service,
@@ -483,6 +599,56 @@ class UniversalBle {
     return read(deviceId, service, characteristic, timeout: timeout);
   }
 
+  static Completer<bool> _connectionEventCompleter(
+    String deviceId, {
+    Duration? timeout,
+  }) {
+    timeout ??= const Duration(seconds: 60);
+    StreamSubscription? connectionSubscription;
+    Completer<bool> completer = Completer();
+
+    void cancelSubscription() {
+      connectionSubscription?.cancel();
+      connectionSubscription = null;
+    }
+
+    void handleError(dynamic error) {
+      cancelSubscription();
+      if (completer.isCompleted) return;
+      completer.completeError(ConnectionException(error));
+    }
+
+    connectionSubscription = _platform
+        .bleConnectionUpdateStreamController
+        .stream
+        .where((e) => e.deviceId == deviceId)
+        .listen(
+          (e) {
+            cancelSubscription();
+            if (e.error != null) {
+              handleError(e.error);
+            } else {
+              if (!completer.isCompleted) {
+                completer.complete(e.isConnected);
+              }
+            }
+          },
+          onError: handleError,
+          cancelOnError: true,
+        );
+
+    completer.future
+        .timeout(timeout)
+        .then((_) {
+          cancelSubscription();
+        })
+        .catchError((_) {
+          cancelSubscription();
+        });
+
+    return completer;
+  }
+
   static Future<void> _sendBleInputPropertyCommand(
     String deviceId,
     String service,
@@ -512,10 +678,7 @@ class UniversalBle {
     // Try to connect first
     if (connectionState != BleConnectionState.connected) {
       UniversalLogger.logInfo("Connecting to $deviceId");
-      await connect(
-        deviceId,
-        timeout: timeout,
-      );
+      await connect(deviceId, timeout: timeout);
     }
 
     List<BleService> services = await discoverServices(
@@ -575,7 +738,9 @@ class UniversalBle {
       if (BleUuidParser.compareStrings(service.uuid, bleCommand.service)) {
         for (BleCharacteristic char in service.characteristics) {
           if (BleUuidParser.compareStrings(
-              char.uuid, bleCommand.characteristic)) {
+            char.uuid,
+            bleCommand.characteristic,
+          )) {
             characteristic = char;
             break;
           }
@@ -591,11 +756,13 @@ class UniversalBle {
     bool? withoutResponse;
     if (characteristic.properties.contains(CharacteristicProperty.write)) {
       withoutResponse = false;
-    } else if (characteristic.properties
-        .contains(CharacteristicProperty.writeWithoutResponse)) {
+    } else if (characteristic.properties.contains(
+      CharacteristicProperty.writeWithoutResponse,
+    )) {
       withoutResponse = true;
-    } else if (!characteristic.properties
-        .contains(CharacteristicProperty.read)) {
+    } else if (!characteristic.properties.contains(
+      CharacteristicProperty.read,
+    )) {
       throw PairingException(
         "BleCommand does not support read or write operation",
       );
@@ -633,7 +800,7 @@ class UniversalBle {
 
   /// Get scan results.
   static set onScanResult(OnScanResult? onScanResult) =>
-      _platform.onScanResult = onScanResult;
+      _platform.onScanResultUpdate = onScanResult;
 
   /// Get connection state changes.
   static set onConnectionChange(OnConnectionChange? onConnectionChange) =>

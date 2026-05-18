@@ -13,27 +13,38 @@ class MockUniversalBle extends UniversalBlePlatform {
   );
 
   Uint8List _serviceValue = utf8.encode('Result');
+  bool _isScanning = false;
 
   final BleService _mockService = BleService('180', [
     BleCharacteristic('180A', [
       CharacteristicProperty.read,
       CharacteristicProperty.write,
       CharacteristicProperty.notify,
-    ]),
+    ], []),
   ]);
 
   @override
   Future<void> startScan({
     ScanFilter? scanFilter,
     PlatformConfig? platformConfig,
-  }) async =>
-      updateScanResult(_mockBleDevice);
+  }) async {
+    _isScanning = true;
+    updateScanResult(_mockBleDevice);
+  }
 
   @override
-  Future<void> stopScan() async {}
+  Future<void> stopScan() async {
+    _isScanning = false;
+  }
 
   @override
-  Future<void> connect(String deviceId, {Duration? connectionTimeout}) async {
+  Future<bool> isScanning() async {
+    return _isScanning;
+  }
+
+  @override
+  Future<void> connect(String deviceId,
+      {Duration? connectionTimeout, bool autoConnect = false}) async {
     updateConnection(deviceId, true);
   }
 
@@ -43,7 +54,8 @@ class MockUniversalBle extends UniversalBlePlatform {
   }
 
   @override
-  Future<List<BleService>> discoverServices(String deviceId) async {
+  Future<List<BleService>> discoverServices(
+      String deviceId, bool withDescriptors) async {
     return [_mockService];
   }
 
@@ -92,6 +104,12 @@ class MockUniversalBle extends UniversalBlePlatform {
   }
 
   @override
+  Future<void> requestConnectionPriority(
+    String deviceId,
+    BleConnectionPriority priority,
+  ) async {}
+
+  @override
   Future<void> setNotifiable(String deviceId, String service,
       String characteristic, BleInputProperty bleInputProperty) async {}
 
@@ -119,6 +137,16 @@ class MockUniversalBle extends UniversalBlePlatform {
 
   @override
   Future<bool> disableBluetooth() {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<void> requestPermissions({bool withAndroidFineLocation = false}) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<int> readRssi(String deviceId) {
     throw UnimplementedError();
   }
 }

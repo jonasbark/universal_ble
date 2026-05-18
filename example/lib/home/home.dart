@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:universal_ble/universal_ble.dart';
@@ -5,26 +7,30 @@ import 'package:universal_ble_example/data/mock_universal_ble.dart';
 import 'package:universal_ble_example/home/widgets/scan_filter_widget.dart';
 import 'package:universal_ble_example/home/widgets/scanned_devices_placeholder_widget.dart';
 import 'package:universal_ble_example/home/widgets/scanned_item_widget.dart';
-import 'package:universal_ble_example/data/permission_handler.dart';
 import 'package:universal_ble_example/peripheral_details/peripheral_detail_page.dart';
 import 'package:universal_ble_example/widgets/platform_button.dart';
 import 'package:universal_ble_example/widgets/responsive_buttons_grid.dart';
 
-class MyApp extends StatefulWidget {
-  const MyApp({super.key});
+class CentralHome extends StatefulWidget {
+  final bool showAppBar;
+  const CentralHome({super.key, this.showAppBar = true});
 
   @override
-  State createState() => _MyAppState();
+  State createState() => _CentralHomeState();
 }
 
-class _MyAppState extends State<MyApp> {
+class _CentralHomeState extends State<CentralHome> {
   final _bleDevices = <BleDevice>[];
+  final _hiddenDevices = <BleDevice>[];
   bool _isScanning = false;
   QueueType _queueType = QueueType.global;
   TextEditingController servicesFilterController = TextEditingController();
   TextEditingController namePrefixController = TextEditingController();
   TextEditingController manufacturerDataController = TextEditingController();
+  StreamSubscription<AvailabilityState>? _availabilityStreamSubscription;
 
+  bool get isTrackingAvailabilityState =>
+      _availabilityStreamSubscription != null;
   AvailabilityState? bleAvailabilityState;
   ScanFilter? scanFilter;
 
@@ -41,14 +47,13 @@ class _MyAppState extends State<MyApp> {
     UniversalBle.queueType = _queueType;
     UniversalBle.timeout = const Duration(seconds: 10);
 
-    UniversalBle.availabilityStream.listen((state) {
-      setState(() {
-        bleAvailabilityState = state;
-      });
-    });
-
     UniversalBle.scanStream.listen((result) {
       // log(result.toString());
+      // If device is already in hidden devices, skip
+      if (_hiddenDevices.any((e) => e.deviceId == result.deviceId)) {
+        // debugPrint("Skipping hidden device: ${result.deviceId}");
+        return;
+      }
       int index = _bleDevices.indexWhere((e) => e.deviceId == result.deviceId);
       if (index == -1) {
         _bleDevices.add(result);
@@ -64,12 +69,28 @@ class _MyAppState extends State<MyApp> {
     // UniversalBle.onQueueUpdate = (String id, int remainingItems) {
     //   debugPrint("Queue: $id RemainingItems: $remainingItems");
     // };
+
+    UniversalBle.isScanning().then((value) {
+      debugPrint("Is Scanning: $value");
+      setState(() {
+        _isScanning = value;
+      });
+    });
+  }
+
+  void trackAvailabilityState() {
+    _availabilityStreamSubscription = UniversalBle.availabilityStream.listen(
+      (state) {
+        setState(() {
+          bleAvailabilityState = state;
+        });
+      },
+    );
+    setState(() {});
   }
 
   Future<void> startScan() async {
-    await UniversalBle.startScan(
-      scanFilter: scanFilter,
-    );
+    await UniversalBle.startScan(scanFilter: scanFilter);
   }
 
   Future<void> _getSystemDevices() async {
@@ -119,24 +140,40 @@ class _MyAppState extends State<MyApp> {
   }
 
   @override
+  void dispose() {
+    _availabilityStreamSubscription?.cancel();
+    servicesFilterController.dispose();
+    namePrefixController.dispose();
+    manufacturerDataController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void setState(VoidCallback fn) {
+    if (mounted) super.setState(fn);
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Universal BLE'),
-        elevation: 4,
-        actions: [
-          if (_isScanning)
-            const Padding(
-              padding: EdgeInsets.all(8.0),
-              child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator.adaptive(
-                    strokeWidth: 2,
-                  )),
-            ),
-        ],
-      ),
+      appBar: widget.showAppBar
+          ? AppBar(
+              title: const Text('Universal BLE - Central'),
+              elevation: 4,
+              actions: [
+                if (_isScanning)
+                  const Padding(
+                    padding: EdgeInsets.all(8.0),
+                    child: SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator.adaptive(
+                          strokeWidth: 2,
+                        )),
+                  ),
+              ],
+            )
+          : null,
       body: Column(
         children: [
           Padding(
@@ -187,16 +224,38 @@ class _MyAppState extends State<MyApp> {
                             showSnackbar("BluetoothDisabled: $isDisabled");
                           },
                         ),
-                if (BleCapabilities.requiresRuntimePermission)
+                if (BleCapabilities.requiresRuntimePermission) ...[
                   PlatformButton(
-                    text: 'Check Permissions',
+                    text: 'Is Permission Granted',
                     onPressed: () async {
-                      bool hasPermissions =
-                          await PermissionHandler.arePermissionsGranted();
-                      if (hasPermissions) {
-                        showSnackbar("Permissions granted");
+                      try {
+                        bool granted = await UniversalBle.hasPermissions(
+                          withAndroidFineLocation: false,
+                        );
+                        showSnackbar("Is Permission Granted: $granted");
+                      } catch (e) {
+                        showSnackbar(e.toString());
                       }
                     },
+                  ),
+                  PlatformButton(
+                    text: 'Request Permissions',
+                    onPressed: () async {
+                      try {
+                        await UniversalBle.requestPermissions(
+                          withAndroidFineLocation: false,
+                        );
+                        showSnackbar("Permissions granted");
+                      } catch (e) {
+                        showSnackbar(e.toString());
+                      }
+                    },
+                  ),
+                ],
+                if (!isTrackingAvailabilityState)
+                  PlatformButton(
+                    text: 'Track Availability State',
+                    onPressed: trackAvailabilityState,
                   ),
                 if (BleCapabilities.supportsConnectedDevicesApi)
                   PlatformButton(
@@ -220,6 +279,30 @@ class _MyAppState extends State<MyApp> {
                   text: 'Scan Filters',
                   onPressed: _showScanFilterBottomSheet,
                 ),
+                if (_hiddenDevices.isNotEmpty)
+                  PlatformButton(
+                    text: 'Unhide ${_hiddenDevices.length} Devices',
+                    onPressed: () {
+                      setState(() {
+                        _hiddenDevices.clear();
+                      });
+                    },
+                  )
+                else if (_bleDevices.isNotEmpty)
+                  Tooltip(
+                    message:
+                        'Hide already discovered devices. When you turn on a new device, it will be easier to spot.',
+                    child: PlatformButton(
+                      text: 'Hide Already Discovered Devices',
+                      onPressed: () {
+                        setState(() {
+                          _hiddenDevices.clear();
+                          _hiddenDevices.addAll(_bleDevices);
+                          _bleDevices.clear();
+                        });
+                      },
+                    ),
+                  ),
                 if (_bleDevices.isNotEmpty)
                   PlatformButton(
                     text: 'Clear List',
@@ -235,12 +318,13 @@ class _MyAppState extends State<MyApp> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Text(
-                  'Ble Availability : ${bleAvailabilityState?.name}',
+              if (isTrackingAvailabilityState)
+                Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Text(
+                    'Ble Availability : ${bleAvailabilityState?.name}',
+                  ),
                 ),
-              ),
             ],
           ),
           const Divider(color: Colors.blue),
