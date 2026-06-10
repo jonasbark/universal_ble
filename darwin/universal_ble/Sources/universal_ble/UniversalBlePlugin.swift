@@ -224,7 +224,6 @@ private class BleCentralDarwin: NSObject, UniversalBlePlatformChannel, CBCentral
           CBConnectPeripheralOptionEnableAutoReconnect: true
         ]
         manager.connect(peripheral, options: options)
-        manager.connect(peripheral, options: options)
       } else {
         // Auto-reconnect via CBConnectPeripheralOptionEnableAutoReconnect is only
         // available on iOS 17.0 / macOS 14.0 / watchOS 10.0 / tvOS 17.0 and later.
