@@ -610,6 +610,108 @@ size_t PigeonInternalDeepHash(const UniversalBleDescriptor& v) {
   return v.Hash();
 }
 
+// BleConnectionParametersUpdated
+
+BleConnectionParametersUpdated::BleConnectionParametersUpdated(
+  const std::string& device_id,
+  int64_t interval,
+  int64_t latency,
+  int64_t supervision_timeout,
+  int64_t status)
+ : device_id_(device_id),
+    interval_(interval),
+    latency_(latency),
+    supervision_timeout_(supervision_timeout),
+    status_(status) {}
+
+const std::string& BleConnectionParametersUpdated::device_id() const {
+  return device_id_;
+}
+
+void BleConnectionParametersUpdated::set_device_id(std::string_view value_arg) {
+  device_id_ = value_arg;
+}
+
+
+int64_t BleConnectionParametersUpdated::interval() const {
+  return interval_;
+}
+
+void BleConnectionParametersUpdated::set_interval(int64_t value_arg) {
+  interval_ = value_arg;
+}
+
+
+int64_t BleConnectionParametersUpdated::latency() const {
+  return latency_;
+}
+
+void BleConnectionParametersUpdated::set_latency(int64_t value_arg) {
+  latency_ = value_arg;
+}
+
+
+int64_t BleConnectionParametersUpdated::supervision_timeout() const {
+  return supervision_timeout_;
+}
+
+void BleConnectionParametersUpdated::set_supervision_timeout(int64_t value_arg) {
+  supervision_timeout_ = value_arg;
+}
+
+
+int64_t BleConnectionParametersUpdated::status() const {
+  return status_;
+}
+
+void BleConnectionParametersUpdated::set_status(int64_t value_arg) {
+  status_ = value_arg;
+}
+
+
+EncodableList BleConnectionParametersUpdated::ToEncodableList() const {
+  EncodableList list;
+  list.reserve(5);
+  list.push_back(EncodableValue(device_id_));
+  list.push_back(EncodableValue(interval_));
+  list.push_back(EncodableValue(latency_));
+  list.push_back(EncodableValue(supervision_timeout_));
+  list.push_back(EncodableValue(status_));
+  return list;
+}
+
+BleConnectionParametersUpdated BleConnectionParametersUpdated::FromEncodableList(const EncodableList& list) {
+  BleConnectionParametersUpdated decoded(
+    std::get<std::string>(list[0]),
+    std::get<int64_t>(list[1]),
+    std::get<int64_t>(list[2]),
+    std::get<int64_t>(list[3]),
+    std::get<int64_t>(list[4]));
+  return decoded;
+}
+
+bool BleConnectionParametersUpdated::operator==(const BleConnectionParametersUpdated& other) const {
+  return PigeonInternalDeepEquals(device_id_, other.device_id_) && PigeonInternalDeepEquals(interval_, other.interval_) && PigeonInternalDeepEquals(latency_, other.latency_) && PigeonInternalDeepEquals(supervision_timeout_, other.supervision_timeout_) && PigeonInternalDeepEquals(status_, other.status_);
+}
+
+bool BleConnectionParametersUpdated::operator!=(const BleConnectionParametersUpdated& other) const {
+  return !(*this == other);
+}
+
+size_t BleConnectionParametersUpdated::Hash() const {
+  size_t result = 1;
+  result = result * 31 + PigeonInternalDeepHash(device_id_);
+  result = result * 31 + PigeonInternalDeepHash(interval_);
+  result = result * 31 + PigeonInternalDeepHash(latency_);
+  result = result * 31 + PigeonInternalDeepHash(supervision_timeout_);
+  result = result * 31 + PigeonInternalDeepHash(status_);
+  return result;
+}
+
+size_t PigeonInternalDeepHash(const BleConnectionParametersUpdated& v) {
+  return v.Hash();
+}
+
 // AndroidOptions
 
 AndroidOptions::AndroidOptions() {}
@@ -617,10 +719,16 @@ AndroidOptions::AndroidOptions() {}
 AndroidOptions::AndroidOptions(
   const bool* request_location_permission,
   const AndroidScanMode* scan_mode,
-  const int64_t* report_delay_millis)
+  const int64_t* report_delay_millis,
+  const EncodableList* callback_type,
+  const AndroidScanMatchMode* match_mode,
+  const AndroidScanNumOfMatches* num_of_matches)
  : request_location_permission_(request_location_permission ? std::optional<bool>(*request_location_permission) : std::nullopt),
     scan_mode_(scan_mode ? std::optional<AndroidScanMode>(*scan_mode) : std::nullopt),
-    report_delay_millis_(report_delay_millis ? std::optional<int64_t>(*report_delay_millis) : std::nullopt) {}
+    report_delay_millis_(report_delay_millis ? std::optional<int64_t>(*report_delay_millis) : std::nullopt),
+    callback_type_(callback_type ? std::optional<EncodableList>(*callback_type) : std::nullopt),
+    match_mode_(match_mode ? std::optional<AndroidScanMatchMode>(*match_mode) : std::nullopt),
+    num_of_matches_(num_of_matches ? std::optional<AndroidScanNumOfMatches>(*num_of_matches) : std::nullopt) {}
 
 const bool* AndroidOptions::request_location_permission() const {
   return request_location_permission_ ? &(*request_location_permission_) : nullptr;
@@ -661,12 +769,54 @@ void AndroidOptions::set_report_delay_millis(int64_t value_arg) {
 }
 
 
+const EncodableList* AndroidOptions::callback_type() const {
+  return callback_type_ ? &(*callback_type_) : nullptr;
+}
+
+void AndroidOptions::set_callback_type(const EncodableList* value_arg) {
+  callback_type_ = value_arg ? std::optional<EncodableList>(*value_arg) : std::nullopt;
+}
+
+void AndroidOptions::set_callback_type(const EncodableList& value_arg) {
+  callback_type_ = value_arg;
+}
+
+
+const AndroidScanMatchMode* AndroidOptions::match_mode() const {
+  return match_mode_ ? &(*match_mode_) : nullptr;
+}
+
+void AndroidOptions::set_match_mode(const AndroidScanMatchMode* value_arg) {
+  match_mode_ = value_arg ? std::optional<AndroidScanMatchMode>(*value_arg) : std::nullopt;
+}
+
+void AndroidOptions::set_match_mode(const AndroidScanMatchMode& value_arg) {
+  match_mode_ = value_arg;
+}
+
+
+const AndroidScanNumOfMatches* AndroidOptions::num_of_matches() const {
+  return num_of_matches_ ? &(*num_of_matches_) : nullptr;
+}
+
+void AndroidOptions::set_num_of_matches(const AndroidScanNumOfMatches* value_arg) {
+  num_of_matches_ = value_arg ? std::optional<AndroidScanNumOfMatches>(*value_arg) : std::nullopt;
+}
+
+void AndroidOptions::set_num_of_matches(const AndroidScanNumOfMatches& value_arg) {
+  num_of_matches_ = value_arg;
+}
+
+
 EncodableList AndroidOptions::ToEncodableList() const {
   EncodableList list;
-  list.reserve(3);
+  list.reserve(6);
   list.push_back(request_location_permission_ ? EncodableValue(*request_location_permission_) : EncodableValue());
   list.push_back(scan_mode_ ? CustomEncodableValue(*scan_mode_) : EncodableValue());
   list.push_back(report_delay_millis_ ? EncodableValue(*report_delay_millis_) : EncodableValue());
+  list.push_back(callback_type_ ? EncodableValue(*callback_type_) : EncodableValue());
+  list.push_back(match_mode_ ? CustomEncodableValue(*match_mode_) : EncodableValue());
+  list.push_back(num_of_matches_ ? CustomEncodableValue(*num_of_matches_) : EncodableValue());
   return list;
 }
 
@@ -684,11 +834,23 @@ AndroidOptions AndroidOptions::FromEncodableList(const EncodableList& list) {
   if (!encodable_report_delay_millis.IsNull()) {
     decoded.set_report_delay_millis(std::get<int64_t>(encodable_report_delay_millis));
   }
+  auto& encodable_callback_type = list[3];
+  if (!encodable_callback_type.IsNull()) {
+    decoded.set_callback_type(std::get<EncodableList>(encodable_callback_type));
+  }
+  auto& encodable_match_mode = list[4];
+  if (!encodable_match_mode.IsNull()) {
+    decoded.set_match_mode(std::any_cast<const AndroidScanMatchMode&>(std::get<CustomEncodableValue>(encodable_match_mode)));
+  }
+  auto& encodable_num_of_matches = list[5];
+  if (!encodable_num_of_matches.IsNull()) {
+    decoded.set_num_of_matches(std::any_cast<const AndroidScanNumOfMatches&>(std::get<CustomEncodableValue>(encodable_num_of_matches)));
+  }
   return decoded;
 }
 
 bool AndroidOptions::operator==(const AndroidOptions& other) const {
-  return PigeonInternalDeepEquals(request_location_permission_, other.request_location_permission_) && PigeonInternalDeepEquals(scan_mode_, other.scan_mode_) && PigeonInternalDeepEquals(report_delay_millis_, other.report_delay_millis_);
+  return PigeonInternalDeepEquals(request_location_permission_, other.request_location_permission_) && PigeonInternalDeepEquals(scan_mode_, other.scan_mode_) && PigeonInternalDeepEquals(report_delay_millis_, other.report_delay_millis_) && PigeonInternalDeepEquals(callback_type_, other.callback_type_) && PigeonInternalDeepEquals(match_mode_, other.match_mode_) && PigeonInternalDeepEquals(num_of_matches_, other.num_of_matches_);
 }
 
 bool AndroidOptions::operator!=(const AndroidOptions& other) const {
@@ -700,6 +862,9 @@ size_t AndroidOptions::Hash() const {
   result = result * 31 + PigeonInternalDeepHash(request_location_permission_);
   result = result * 31 + PigeonInternalDeepHash(scan_mode_);
   result = result * 31 + PigeonInternalDeepHash(report_delay_millis_);
+  result = result * 31 + PigeonInternalDeepHash(callback_type_);
+  result = result * 31 + PigeonInternalDeepHash(match_mode_);
+  result = result * 31 + PigeonInternalDeepHash(num_of_matches_);
   return result;
 }
 
@@ -1632,74 +1797,92 @@ EncodableValue PigeonInternalCodecSerializer::ReadValueOfType(
     case 136: {
         const auto& encodable_enum_arg = ReadValue(stream);
         const int64_t enum_arg_value = encodable_enum_arg.IsNull() ? 0 : encodable_enum_arg.LongValue();
-        return encodable_enum_arg.IsNull() ? EncodableValue() : CustomEncodableValue(static_cast<CharacteristicProperty>(enum_arg_value));
+        return encodable_enum_arg.IsNull() ? EncodableValue() : CustomEncodableValue(static_cast<AndroidScanCallbackType>(enum_arg_value));
       }
     case 137: {
         const auto& encodable_enum_arg = ReadValue(stream);
         const int64_t enum_arg_value = encodable_enum_arg.IsNull() ? 0 : encodable_enum_arg.LongValue();
-        return encodable_enum_arg.IsNull() ? EncodableValue() : CustomEncodableValue(static_cast<PeripheralReadinessState>(enum_arg_value));
+        return encodable_enum_arg.IsNull() ? EncodableValue() : CustomEncodableValue(static_cast<AndroidScanMatchMode>(enum_arg_value));
       }
     case 138: {
         const auto& encodable_enum_arg = ReadValue(stream);
         const int64_t enum_arg_value = encodable_enum_arg.IsNull() ? 0 : encodable_enum_arg.LongValue();
-        return encodable_enum_arg.IsNull() ? EncodableValue() : CustomEncodableValue(static_cast<PeripheralAttributePermission>(enum_arg_value));
+        return encodable_enum_arg.IsNull() ? EncodableValue() : CustomEncodableValue(static_cast<AndroidScanNumOfMatches>(enum_arg_value));
       }
     case 139: {
         const auto& encodable_enum_arg = ReadValue(stream);
         const int64_t enum_arg_value = encodable_enum_arg.IsNull() ? 0 : encodable_enum_arg.LongValue();
-        return encodable_enum_arg.IsNull() ? EncodableValue() : CustomEncodableValue(static_cast<PeripheralAdvertisingState>(enum_arg_value));
+        return encodable_enum_arg.IsNull() ? EncodableValue() : CustomEncodableValue(static_cast<CharacteristicProperty>(enum_arg_value));
       }
     case 140: {
         const auto& encodable_enum_arg = ReadValue(stream);
         const int64_t enum_arg_value = encodable_enum_arg.IsNull() ? 0 : encodable_enum_arg.LongValue();
-        return encodable_enum_arg.IsNull() ? EncodableValue() : CustomEncodableValue(static_cast<UniversalBleErrorCode>(enum_arg_value));
+        return encodable_enum_arg.IsNull() ? EncodableValue() : CustomEncodableValue(static_cast<PeripheralReadinessState>(enum_arg_value));
       }
     case 141: {
-        return CustomEncodableValue(UniversalBleScanResult::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
+        const auto& encodable_enum_arg = ReadValue(stream);
+        const int64_t enum_arg_value = encodable_enum_arg.IsNull() ? 0 : encodable_enum_arg.LongValue();
+        return encodable_enum_arg.IsNull() ? EncodableValue() : CustomEncodableValue(static_cast<PeripheralAttributePermission>(enum_arg_value));
       }
     case 142: {
-        return CustomEncodableValue(UniversalBleService::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
+        const auto& encodable_enum_arg = ReadValue(stream);
+        const int64_t enum_arg_value = encodable_enum_arg.IsNull() ? 0 : encodable_enum_arg.LongValue();
+        return encodable_enum_arg.IsNull() ? EncodableValue() : CustomEncodableValue(static_cast<PeripheralAdvertisingState>(enum_arg_value));
       }
     case 143: {
-        return CustomEncodableValue(UniversalBleCharacteristic::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
+        const auto& encodable_enum_arg = ReadValue(stream);
+        const int64_t enum_arg_value = encodable_enum_arg.IsNull() ? 0 : encodable_enum_arg.LongValue();
+        return encodable_enum_arg.IsNull() ? EncodableValue() : CustomEncodableValue(static_cast<UniversalBleErrorCode>(enum_arg_value));
       }
     case 144: {
-        return CustomEncodableValue(UniversalBleDescriptor::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
+        return CustomEncodableValue(UniversalBleScanResult::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
       }
     case 145: {
-        return CustomEncodableValue(AndroidOptions::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
+        return CustomEncodableValue(UniversalBleService::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
       }
     case 146: {
-        return CustomEncodableValue(UniversalScanConfig::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
+        return CustomEncodableValue(UniversalBleCharacteristic::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
       }
     case 147: {
-        return CustomEncodableValue(UniversalScanFilter::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
+        return CustomEncodableValue(UniversalBleDescriptor::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
       }
     case 148: {
-        return CustomEncodableValue(ManufacturerDataFilter::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
+        return CustomEncodableValue(BleConnectionParametersUpdated::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
       }
     case 149: {
-        return CustomEncodableValue(UniversalManufacturerData::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
+        return CustomEncodableValue(AndroidOptions::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
       }
     case 150: {
-        return CustomEncodableValue(PeripheralAndroidOptions::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
+        return CustomEncodableValue(UniversalScanConfig::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
       }
     case 151: {
-        return CustomEncodableValue(PeripheralPlatformConfig::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
+        return CustomEncodableValue(UniversalScanFilter::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
       }
     case 152: {
-        return CustomEncodableValue(PeripheralService::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
+        return CustomEncodableValue(ManufacturerDataFilter::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
       }
     case 153: {
-        return CustomEncodableValue(PeripheralCharacteristic::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
+        return CustomEncodableValue(UniversalManufacturerData::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
       }
     case 154: {
-        return CustomEncodableValue(PeripheralDescriptor::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
+        return CustomEncodableValue(PeripheralAndroidOptions::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
       }
     case 155: {
-        return CustomEncodableValue(PeripheralReadRequestResult::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
+        return CustomEncodableValue(PeripheralPlatformConfig::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
       }
     case 156: {
+        return CustomEncodableValue(PeripheralService::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
+      }
+    case 157: {
+        return CustomEncodableValue(PeripheralCharacteristic::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
+      }
+    case 158: {
+        return CustomEncodableValue(PeripheralDescriptor::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
+      }
+    case 159: {
+        return CustomEncodableValue(PeripheralReadRequestResult::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
+      }
+    case 160: {
         return CustomEncodableValue(PeripheralWriteRequestResult::FromEncodableList(std::get<EncodableList>(ReadValue(stream))));
       }
     default:
@@ -1746,108 +1929,128 @@ void PigeonInternalCodecSerializer::WriteValue(
       WriteValue(EncodableValue(static_cast<int>(std::any_cast<AndroidScanMode>(*custom_value))), stream);
       return;
     }
-    if (custom_value->type() == typeid(CharacteristicProperty)) {
+    if (custom_value->type() == typeid(AndroidScanCallbackType)) {
       stream->WriteByte(136);
+      WriteValue(EncodableValue(static_cast<int>(std::any_cast<AndroidScanCallbackType>(*custom_value))), stream);
+      return;
+    }
+    if (custom_value->type() == typeid(AndroidScanMatchMode)) {
+      stream->WriteByte(137);
+      WriteValue(EncodableValue(static_cast<int>(std::any_cast<AndroidScanMatchMode>(*custom_value))), stream);
+      return;
+    }
+    if (custom_value->type() == typeid(AndroidScanNumOfMatches)) {
+      stream->WriteByte(138);
+      WriteValue(EncodableValue(static_cast<int>(std::any_cast<AndroidScanNumOfMatches>(*custom_value))), stream);
+      return;
+    }
+    if (custom_value->type() == typeid(CharacteristicProperty)) {
+      stream->WriteByte(139);
       WriteValue(EncodableValue(static_cast<int>(std::any_cast<CharacteristicProperty>(*custom_value))), stream);
       return;
     }
     if (custom_value->type() == typeid(PeripheralReadinessState)) {
-      stream->WriteByte(137);
+      stream->WriteByte(140);
       WriteValue(EncodableValue(static_cast<int>(std::any_cast<PeripheralReadinessState>(*custom_value))), stream);
       return;
     }
     if (custom_value->type() == typeid(PeripheralAttributePermission)) {
-      stream->WriteByte(138);
+      stream->WriteByte(141);
       WriteValue(EncodableValue(static_cast<int>(std::any_cast<PeripheralAttributePermission>(*custom_value))), stream);
       return;
     }
     if (custom_value->type() == typeid(PeripheralAdvertisingState)) {
-      stream->WriteByte(139);
+      stream->WriteByte(142);
       WriteValue(EncodableValue(static_cast<int>(std::any_cast<PeripheralAdvertisingState>(*custom_value))), stream);
       return;
     }
     if (custom_value->type() == typeid(UniversalBleErrorCode)) {
-      stream->WriteByte(140);
+      stream->WriteByte(143);
       WriteValue(EncodableValue(static_cast<int>(std::any_cast<UniversalBleErrorCode>(*custom_value))), stream);
       return;
     }
     if (custom_value->type() == typeid(UniversalBleScanResult)) {
-      stream->WriteByte(141);
+      stream->WriteByte(144);
       WriteValue(EncodableValue(std::any_cast<UniversalBleScanResult>(*custom_value).ToEncodableList()), stream);
       return;
     }
     if (custom_value->type() == typeid(UniversalBleService)) {
-      stream->WriteByte(142);
+      stream->WriteByte(145);
       WriteValue(EncodableValue(std::any_cast<UniversalBleService>(*custom_value).ToEncodableList()), stream);
       return;
     }
     if (custom_value->type() == typeid(UniversalBleCharacteristic)) {
-      stream->WriteByte(143);
+      stream->WriteByte(146);
       WriteValue(EncodableValue(std::any_cast<UniversalBleCharacteristic>(*custom_value).ToEncodableList()), stream);
       return;
     }
     if (custom_value->type() == typeid(UniversalBleDescriptor)) {
-      stream->WriteByte(144);
+      stream->WriteByte(147);
       WriteValue(EncodableValue(std::any_cast<UniversalBleDescriptor>(*custom_value).ToEncodableList()), stream);
       return;
     }
+    if (custom_value->type() == typeid(BleConnectionParametersUpdated)) {
+      stream->WriteByte(148);
+      WriteValue(EncodableValue(std::any_cast<BleConnectionParametersUpdated>(*custom_value).ToEncodableList()), stream);
+      return;
+    }
     if (custom_value->type() == typeid(AndroidOptions)) {
-      stream->WriteByte(145);
+      stream->WriteByte(149);
       WriteValue(EncodableValue(std::any_cast<AndroidOptions>(*custom_value).ToEncodableList()), stream);
       return;
     }
     if (custom_value->type() == typeid(UniversalScanConfig)) {
-      stream->WriteByte(146);
+      stream->WriteByte(150);
       WriteValue(EncodableValue(std::any_cast<UniversalScanConfig>(*custom_value).ToEncodableList()), stream);
       return;
     }
     if (custom_value->type() == typeid(UniversalScanFilter)) {
-      stream->WriteByte(147);
+      stream->WriteByte(151);
       WriteValue(EncodableValue(std::any_cast<UniversalScanFilter>(*custom_value).ToEncodableList()), stream);
       return;
     }
     if (custom_value->type() == typeid(ManufacturerDataFilter)) {
-      stream->WriteByte(148);
+      stream->WriteByte(152);
       WriteValue(EncodableValue(std::any_cast<ManufacturerDataFilter>(*custom_value).ToEncodableList()), stream);
       return;
     }
     if (custom_value->type() == typeid(UniversalManufacturerData)) {
-      stream->WriteByte(149);
+      stream->WriteByte(153);
       WriteValue(EncodableValue(std::any_cast<UniversalManufacturerData>(*custom_value).ToEncodableList()), stream);
       return;
     }
     if (custom_value->type() == typeid(PeripheralAndroidOptions)) {
-      stream->WriteByte(150);
+      stream->WriteByte(154);
       WriteValue(EncodableValue(std::any_cast<PeripheralAndroidOptions>(*custom_value).ToEncodableList()), stream);
       return;
     }
     if (custom_value->type() == typeid(PeripheralPlatformConfig)) {
-      stream->WriteByte(151);
+      stream->WriteByte(155);
       WriteValue(EncodableValue(std::any_cast<PeripheralPlatformConfig>(*custom_value).ToEncodableList()), stream);
       return;
     }
     if (custom_value->type() == typeid(PeripheralService)) {
-      stream->WriteByte(152);
+      stream->WriteByte(156);
       WriteValue(EncodableValue(std::any_cast<PeripheralService>(*custom_value).ToEncodableList()), stream);
       return;
     }
     if (custom_value->type() == typeid(PeripheralCharacteristic)) {
-      stream->WriteByte(153);
+      stream->WriteByte(157);
       WriteValue(EncodableValue(std::any_cast<PeripheralCharacteristic>(*custom_value).ToEncodableList()), stream);
       return;
     }
     if (custom_value->type() == typeid(PeripheralDescriptor)) {
-      stream->WriteByte(154);
+      stream->WriteByte(158);
       WriteValue(EncodableValue(std::any_cast<PeripheralDescriptor>(*custom_value).ToEncodableList()), stream);
       return;
     }
     if (custom_value->type() == typeid(PeripheralReadRequestResult)) {
-      stream->WriteByte(155);
+      stream->WriteByte(159);
       WriteValue(EncodableValue(std::any_cast<PeripheralReadRequestResult>(*custom_value).ToEncodableList()), stream);
       return;
     }
     if (custom_value->type() == typeid(PeripheralWriteRequestResult)) {
-      stream->WriteByte(156);
+      stream->WriteByte(160);
       WriteValue(EncodableValue(std::any_cast<PeripheralWriteRequestResult>(*custom_value).ToEncodableList()), stream);
       return;
     }
@@ -2722,6 +2925,31 @@ void UniversalBleCallbackChannel::OnConnectionChanged(
     EncodableValue(device_id_arg),
     EncodableValue(connected_arg),
     error_arg ? EncodableValue(*error_arg) : EncodableValue(),
+  });
+  channel.Send(encoded_api_arguments, [channel_name, on_success = std::move(on_success), on_error = std::move(on_error)](const uint8_t* reply, size_t reply_size) {
+    std::unique_ptr<EncodableValue> response = GetCodec().DecodeMessage(reply, reply_size);
+    const auto& encodable_return_value = *response;
+    const auto* list_return_value = std::get_if<EncodableList>(&encodable_return_value);
+    if (list_return_value) {
+      if (list_return_value->size() > 1) {
+        on_error(FlutterError(std::get<std::string>(list_return_value->at(0)), std::get<std::string>(list_return_value->at(1)), list_return_value->at(2)));
+      } else {
+        on_success();
+      }
+    } else {
+      on_error(CreateConnectionError(channel_name));
+    } 
+  });
+}
+
+void UniversalBleCallbackChannel::OnConnectionParametersUpdated(
+  const BleConnectionParametersUpdated& update_arg,
+  std::function<void(void)>&& on_success,
+  std::function<void(const FlutterError&)>&& on_error) {
+  const std::string channel_name = "dev.flutter.pigeon.universal_ble.UniversalBleCallbackChannel.onConnectionParametersUpdated" + message_channel_suffix_;
+  BasicMessageChannel<> channel(binary_messenger_, channel_name, &GetCodec());
+  EncodableValue encoded_api_arguments = EncodableValue(EncodableList{
+    CustomEncodableValue(update_arg),
   });
   channel.Send(encoded_api_arguments, [channel_name, on_success = std::move(on_success), on_error = std::move(on_error)](const uint8_t* reply, size_t reply_size) {
     std::unique_ptr<EncodableValue> response = GetCodec().DecodeMessage(reply, reply_size);

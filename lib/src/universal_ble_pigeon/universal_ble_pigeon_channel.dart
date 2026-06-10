@@ -115,7 +115,7 @@ class UniversalBlePigeonChannel extends UniversalBlePlatform
     String deviceId,
     String service,
     String characteristic, {
-    final Duration? timeout,
+    Duration? timeout,
   }) {
     return _executeWithErrorHandling(
       () => _channel.readValue(deviceId, service, characteristic),
@@ -250,6 +250,10 @@ class UniversalBlePigeonChannel extends UniversalBlePlatform
   @override
   void onPairStateChange(String deviceId, bool isPaired, String? error) =>
       updatePairingState(deviceId, isPaired);
+
+  @override
+  void onConnectionParametersUpdated(BleConnectionParametersUpdated update) =>
+      updateConnectionParameters(update);
 }
 
 extension _BleServiceExtension on UniversalBleService {

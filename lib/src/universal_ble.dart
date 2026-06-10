@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:universal_ble/src/utils/ble_command_queue.dart';
-import 'package:universal_ble/src/universal_ble_linux/universal_ble_linux.dart';
+import 'package:universal_ble/src/universal_ble_linux/universal_ble_linux_instance.dart';
 import 'package:universal_ble/src/universal_ble_pigeon/universal_ble_pigeon_channel.dart';
 import 'package:universal_ble/src/universal_ble_web/universal_ble_web.dart';
 import 'package:universal_ble/src/utils/universal_logger.dart';
@@ -285,7 +285,7 @@ class UniversalBle {
     String deviceId,
     String service,
     String characteristic, {
-    final Duration? timeout,
+    Duration? timeout,
   }) async {
     return await _bleCommandQueue.queueCommand(
       () => _platform.readValue(
@@ -594,7 +594,7 @@ class UniversalBle {
     String deviceId,
     String service,
     String characteristic, {
-    final Duration? timeout,
+    Duration? timeout,
   }) {
     return read(deviceId, service, characteristic, timeout: timeout);
   }
@@ -814,10 +814,15 @@ class UniversalBle {
   static set onPairingStateChange(OnPairingStateChange pairingStateChange) =>
       _platform.onPairingStateChange = pairingStateChange;
 
+  /// Connection parameter updates (Android API 26+).
+  static set onConnectionParametersChange(
+    OnConnectionParametersChange? onConnectionParametersChange,
+  ) => _platform.onConnectionParametersChange = onConnectionParametersChange;
+
   static UniversalBlePlatform _defaultPlatform() {
     if (kIsWeb) return UniversalBleWeb.instance;
     if (defaultTargetPlatform == TargetPlatform.linux) {
-      return UniversalBleLinux.instance;
+      return universalBleLinuxInstance;
     }
     return UniversalBlePigeonChannel.instance;
   }

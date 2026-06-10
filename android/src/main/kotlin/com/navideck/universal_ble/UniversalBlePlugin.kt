@@ -192,6 +192,15 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
             androidConfig.reportDelayMillis?.let { reportDelay ->
                 builder.setReportDelay(reportDelay)
             }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                androidConfig.callbackType?.let { types ->
+                    val combined = types.mapNotNull { it.parse() }.fold(0) { acc, v -> acc or v }
+                    if (combined != 0) builder.setCallbackType(combined)
+                }
+                androidConfig.matchMode?.parse()?.let { builder.setMatchMode(it) }
+                androidConfig.numOfMatches?.parse()?.let { builder.setNumOfMatches(it) }
+            }
         }
         val settings = builder.build()
 
@@ -821,6 +830,35 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
         }
     }
 
+    // BluetoothGattCallback.onConnectionUpdated is @hide (not in public android.jar).
+    // Same method name is required so the framework invokes it at runtime; no `override`.
+    @Suppress("unused")
+    fun onConnectionUpdated(
+        gatt: BluetoothGatt?,
+        interval: Int,
+        latency: Int,
+        timeout: Int,
+        status: Int,
+    ) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val deviceId = gatt?.device?.address ?: return
+        if (!deviceId.isKnownGatt()) return
+        UniversalBleLogger.logDebug(
+            "onConnectionUpdated -> $deviceId interval=$interval latency=$latency timeout=$timeout status=$status"
+        )
+        mainThreadHandler?.post {
+            callbackChannel?.onConnectionParametersUpdated(
+                BleConnectionParametersUpdated(
+                    deviceId = deviceId,
+                    interval = interval.toLong(),
+                    latency = latency.toLong(),
+                    supervisionTimeout = timeout.toLong(),
+                    status = status.toLong(),
+                )
+            ) {}
+        }
+    }
+
     override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
         val deviceId = gatt?.device?.address ?: return
         mtuResultFutureList.removeAll {
@@ -1127,7 +1165,6 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
                     UniversalBleLogger.logError("No device found in ACTION_BOND_STATE_CHANGED intent")
                     return
                 }
-                peripheralPlugin.onBondStateChanged(bondStateChange)
                 // get pairing failed error
                 when (bondStateChange.state) {
                     BluetoothDevice.BOND_BONDING -> {
@@ -1170,7 +1207,7 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
                 }
             }
 
-            val name = result.device.name
+            val name = result.resolvedDeviceName
             val manufacturerDataList = result.manufacturerDataList
             val serviceData = result.serviceData
 
@@ -1185,7 +1222,7 @@ class UniversalBlePlugin : UniversalBlePlatformChannel, BluetoothGattCallback(),
             mainThreadHandler?.post {
                 callbackChannel?.onScanResult(
                     UniversalBleScanResult(
-                        name = result.device.name,
+                        name = name,
                         deviceId = result.device.address,
                         isPaired = result.device.isBonded(),
                         manufacturerDataList = manufacturerDataList,

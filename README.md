@@ -58,6 +58,7 @@ A cross-platform (Android/iOS/macOS/Windows/Linux/Web) Bluetooth Low Energy (BLE
 | onAvailabilityChange          |   ✔️    | ✔️  |  ✔️   |   ✔️    |  ✔️   | ✔️  |
 | requestMtu                    |   ✔️    | ✔️  |  ✔️   |   ✔️    |  ✔️   | ❌  |
 | requestConnectionPriority     |   ✔️    | ❌  |  ❌   |   ❌    |  ❌   | ❌  |
+| onConnectionParametersChange  |   ✔️    | ❌  |  ❌   |   ❌    |  ❌   | ❌  |
 | readRssi                      |   ✔️    | ✔️  |  ✔️   |   ❌    |  🚧   | ❌  |
 | requestPermissions            |   ✔️    | ✔️  |  ✔️   |   ✔️    |  ✔️   | ✔️  |
 
@@ -511,6 +512,23 @@ await UniversalBle.requestConnectionPriority(
 
 > **Note:** Only supported on Android. On all other platforms this throws `UniversalBleException` with code `notSupported`.
 > Call this after connecting and after `requestMtu()`, before beginning data transfer.
+
+The OS may later change connection parameters without your app requesting it (e.g. for power saving), which can reduce throughput. On Android API 26+, set `UniversalBle.onConnectionParametersChange` and react if needed:
+
+```dart
+UniversalBle.onConnectionParametersChange = (update) {
+  if (update.deviceId != deviceId || !update.isSuccess) return;
+  // Prefer intervalMs for throughput decisions; estimatedPriority is approximate.
+  if (update.intervalMs > 50) {
+    UniversalBle.requestConnectionPriority(
+      deviceId,
+      BleConnectionPriority.highPerformance,
+    );
+  }
+};
+```
+
+> **Note:** Re-requesting high priority on every update can fight the OS power manager — debounce in app code. Requires Android API 26+ (`BleCapabilities.supportsConnectionParametersUpdates`).
 
 ### Reading RSSI
 
@@ -975,6 +993,26 @@ Use clear, user-facing text that explains why Bluetooth is needed in your app.
 Add the `Bluetooth` capability to the macOS app from Xcode.
 
 **Permissions are automatically requested when calling `startScan()`.** You can also manually call `requestPermissions()` if needed.
+
+#### iOS background state restoration
+
+On iOS, when your app declares the `bluetooth-central` background mode and Bluetooth permission is already granted, the central manager is created at launch with a `CBCentralManagerOptionRestoreIdentifierKey`, so CoreBluetooth can [relaunch your app](https://developer.apple.com/documentation/technotes/tn3115-bluetooth-state-restoration-app-relaunch-rules) in the background when a connected peripheral has activity, and hand the live connection back to the plugin. If permission has not been granted yet, creation is deferred until a central BLE API (such as `startScan()` or `connect()`) is called.
+
+To opt in, declare the `Uses Bluetooth LE accessories` background mode. After enabling it, in `Info.plist` you should have:
+
+```xml
+<key>UIBackgroundModes</key>
+<array>
+  ...
+  <string>bluetooth-central</string>
+  ...
+</array>
+```
+Notes:
+
+- Without the `bluetooth-central` background mode, `CBCentralManager` is created lazily on the first central BLE API call and state restoration is disabled.
+- macOS does not support CoreBluetooth state restoration; this behavior is iOS-only.
+- On relaunch, the plugin re-adopts the restored peripherals and emits `onConnectionChanged` for any that are still connected, so your Dart code can resume where it left off.
 
 ### Windows
 

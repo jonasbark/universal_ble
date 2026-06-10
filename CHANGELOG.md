@@ -1,3 +1,24 @@
+## 2.0.4
+* iOS: make Bluetooth state restoration optional by enabling it only when the `bluetooth-central` background mode is declared
+* iOS: when state restoration is enabled, init `CBCentralManager` at launch only if Bluetooth permission is granted
+
+## 2.0.3
+* iOS/macOS: defer `CBPeripheralManager` creation until peripheral APIs are used, fixing Bluetooth permission prompt on app launch
+* iOS: add CoreBluetooth state preservation/restoration so the app can be relaunched in the background by a connected peripheral and resume the live connection. Requires the `bluetooth-central` background mode in `Info.plist` (see README → Permissions → iOS / macOS).
+* Android: Fix missing scan name after reconnection
+* Windows: Fix null pointer crash when BLE device is unpaired during active scanCommits on May 28, * Windows: Refactor property value lookups to use a safe lookup function
+* Fix Dart primary constructor compatibility
+
+## 2.0.2
+* iOS/macOS: retain peripheral from retrievePeripherals to fix API MISUSE on connect
+* Android: migrate to built-in Kotlin (removes Kotlin Gradle Plugin usage)
+* Use conditional imports for the Linux backend so the package is compatible with the WASM runtime on pub.dev
+
+## 2.0.1
+* Android peripheral: eager Kotlin initialization, thread-safe GATT connection cache, and pairing only via `pair()` or when encryption requires it
+* Add `onConnectionParametersChange` to notify when Android link-layer connection parameters change (API 26+)
+* Android: expose `callbackType`, `matchMode`, and `numOfMatches` on `AndroidOptions` so callers can configure `ScanSettings` to defeat aggressive chip-side advert de-duplication on Pixel devices. `callbackType` accepts a `List<AndroidScanCallbackType>` (OR-folded on the native side) and includes a new `allMatchesAutoBatch` value (API 34+).
+
 ## 2.0.0
 * Add peripheral mode on Android, iOS, macOS, and Windows
 * Add `requestConnectionPriority` to allow tuning BLE connection intervals on Android
