@@ -214,7 +214,15 @@ private class BleCentralDarwin: NSObject, UniversalBlePlatformChannel, CBCentral
     if shouldAutoConnect {
       autoConnectDevices.insert(deviceId)
       if #available(iOS 17.0, macOS 14.0, watchOS 10.0, tvOS 17.0, *) {
-        let options: [String: Any] = [CBConnectPeripheralOptionEnableAutoReconnect: true]
+        let options: [String: Any] = [
+          // Notifies the app when the peripheral connects, even if the app is in the background
+          CBConnectPeripheralOptionNotifyOnConnectionKey: true,
+          // Notifies the app when the peripheral disconnects, even if the app is in the background
+          CBConnectPeripheralOptionNotifyOnDisconnectionKey: true,
+          // Wake up the app when the peripheral sends notifications while in background
+          CBConnectPeripheralOptionNotifyOnNotificationKey: true,
+          CBConnectPeripheralOptionEnableAutoReconnect: true
+        ]
         manager.connect(peripheral, options: options)
       } else {
         // Auto-reconnect via CBConnectPeripheralOptionEnableAutoReconnect is only
@@ -228,11 +236,28 @@ private class BleCentralDarwin: NSObject, UniversalBlePlatformChannel, CBCentral
             "is only available on iOS 17+/macOS 14+/watchOS 10+/tvOS 17+. " +
             "On this OS version, reconnections must be handled manually."
         )
-        manager.connect(peripheral)
+
+        let options: [String: Any] = [
+          // Notifies the app when the peripheral connects, even if the app is in the background
+          CBConnectPeripheralOptionNotifyOnConnectionKey: true,
+          // Notifies the app when the peripheral disconnects, even if the app is in the background
+          CBConnectPeripheralOptionNotifyOnDisconnectionKey: true,
+          // Wake up the app when the peripheral sends notifications while in background
+          CBConnectPeripheralOptionNotifyOnNotificationKey: true,
+        ]
+        manager.connect(peripheral, options: options)
       }
     } else {
       autoConnectDevices.remove(deviceId)
-      manager.connect(peripheral)
+      let options: [String: Any] = [
+        // Notifies the app when the peripheral connects, even if the app is in the background
+        CBConnectPeripheralOptionNotifyOnConnectionKey: true,
+        // Notifies the app when the peripheral disconnects, even if the app is in the background
+        CBConnectPeripheralOptionNotifyOnDisconnectionKey: true,
+        // Wake up the app when the peripheral sends notifications while in background
+        CBConnectPeripheralOptionNotifyOnNotificationKey: true,
+      ]
+      manager.connect(peripheral, options: options)
     }
   }
 
