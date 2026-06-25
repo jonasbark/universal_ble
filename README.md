@@ -32,7 +32,7 @@ A cross-platform (Android/iOS/macOS/Windows/Linux/Web) Bluetooth Low Energy (BLE
 - [Timeout](#timeout)
 - [Error Handling](#error-handling)
 - [UUID Format Agnostic](#uuid-format-agnostic)
-- [Permissions](#permissions)
+- [Platform-specific setup](#platform-specific-setup)
 - [Peripheral Mode](#peripheral-mode)
 
 ## API Support
@@ -557,6 +557,13 @@ If you want to parallelize commands between multiple devices, you can set:
 UniversalBle.queueType = QueueType.perDevice;
 ```
 
+You can have separate queues by passing an optional `queueId`. Commands with the same `queueId` are serialized together, but run in parallel with both `QueueType.perDevice` and `QueueType.global`:
+
+```dart
+UniversalBle.write(deviceId, service, char, value1, queueId: '1');
+UniversalBle.write(deviceId, service, char, value2, queueId: '2');
+```
+
 You can also completely disable the queue and batch all commands, even for the same device, by using:
 
 ```dart
@@ -575,13 +582,20 @@ UniversalBle.onQueueUpdate = (String id, int remainingItems) {
 };
 ```
 
-To clear the queue:
+To clear a queue:
 
 ```dart
-  /// Use [BleCommandQueue.globalQueueId] to clear the global queue.
-  /// To clear the queue of a specific device, use `deviceId` as [id].
-  /// If no [id] is provided, all queues will be cleared.
-  UniversalBle.clearQueue(BleCommandQueue.globalQueueId);
+// Clear global queue
+UniversalBle.clearQueue(BleCommandQueue.globalQueueId);
+
+// Clear a per-device queue (when queueType is perDevice)
+UniversalBle.clearQueue(deviceId);
+
+// Clear a custom queue (same string passed as queueId to read/write/etc.)
+UniversalBle.clearQueue('customQueueId');
+
+// Clear all queues
+UniversalBle.clearQueue();
 ```
 
 ## Timeout
@@ -910,7 +924,7 @@ BleUuidParser.number(0x180A); // "0000180a-0000-1000-8000-00805f9b34fb"
 BleUuidParser.compare("180a","0000180A-0000-1000-8000-00805F9B34FB"); // true
 ```
 
-## Permissions
+## Platform-specific setup
 
 You need to perform the following setups:
 
@@ -953,6 +967,23 @@ If your app uses peripheral advertising, add:
 
 ```xml
 <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+```
+
+#### Android scan options
+
+By default, BLE 5 extended advertisements are scanned (API 26+, unchanged from prior releases). Set `legacy: true` for legacy BLE 4.x devices (e.g. ESP32).
+
+```dart
+UniversalBle.startScan(
+  platformConfig: PlatformConfig(
+    android: AndroidOptions(
+      legacy: true, // omit for extended BLE 5 (default)
+      scanMode: AndroidScanMode.lowLatency,
+      callbackType: [AndroidScanCallbackType.allMatches],
+      requestLocationPermission: false,
+    ),
+  ),
+);
 ```
 
 #### Background Scanning (ForegroundTask)
@@ -1008,6 +1039,7 @@ To opt in, declare the `Uses Bluetooth LE accessories` background mode. After en
   ...
 </array>
 ```
+
 Notes:
 
 - Without the `bluetooth-central` background mode, `CBCentralManager` is created lazily on the first central BLE API call and state restoration is disabled.
@@ -1076,7 +1108,7 @@ UniversalBle.requestPermissions(
 );
 ```
 
-> **Note**: When calling `startScan()`, permissions are automatically requested. To configure location permission requests during scanning, use the `platformConfig` parameter:
+> **Note**: When calling `startScan()`, permissions are automatically requested. To configure location permission requests during scanning, use `requestLocationPermission` on `AndroidOptions` (see [Android scan options](#android-scan-options)):
 
 ```dart
 UniversalBle.startScan(
