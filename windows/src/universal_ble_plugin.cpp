@@ -2194,6 +2194,16 @@ fire_and_forget UniversalBlePlugin::RefreshGattServicesAsync(
     device_agent->FinishGattRefresh();
     co_return;
   }
+  // Discovery here disposes service maps, and GattDeviceService::Close must
+  // not run on Flutter's STA (see DisposeConnection). Start on MTA so every
+  // co_await below resumes there, whichever thread raised GattServicesChanged.
+  try {
+    co_await winrt::resume_background();
+  } catch (...) {
+    log_and_swallow_unknown("RefreshGattServicesAsync resume_background");
+    device_agent->FinishGattRefresh();
+    co_return;
+  }
   while (true) {
     bool refreshed = false;
     try {
