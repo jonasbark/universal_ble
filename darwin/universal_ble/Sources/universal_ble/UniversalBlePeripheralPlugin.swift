@@ -20,6 +20,9 @@ final class UniversalBlePeripheralPlugin: NSObject, UniversalBlePeripheralChanne
   // advertises. Tearing one engine down (or clearing its services) must not wipe
   // another engine's advertising state.
   private let serviceRegistry = PeripheralServiceRegistry()
+  // Notifications CoreBluetooth refused because its transmit queue was full;
+  // resent from peripheralManagerIsReady(toUpdateSubscribers:).
+  private let pendingNotifications = PendingNotificationQueue<PendingNotification>(capacity: 64)
 
   init(callbackChannel: UniversalBlePeripheralCallback) {
     self.callbackChannel = callbackChannel
@@ -102,12 +105,17 @@ final class UniversalBlePeripheralPlugin: NSObject, UniversalBlePeripheralChanne
     if let service = serviceRegistry.service(serviceId) {
       ensurePeripheralManager().remove(service)
       serviceRegistry.remove(service)
+      let characteristics = service.characteristics ?? []
+      pendingNotifications.removeAll { pending in
+        characteristics.contains { $0 === pending.characteristic }
+      }
     }
   }
 
   func clearServices() throws {
     peripheralManager?.removeAllServices()
     serviceRegistry.clear()
+    pendingNotifications.removeAll()
   }
 
   func getServices() throws -> [String] {
@@ -165,14 +173,19 @@ final class UniversalBlePeripheralPlugin: NSObject, UniversalBlePeripheralChanne
     } else {
       centrals = nil
     }
-    let success = ensurePeripheralManager().updateValue(
-      value.toData(),
-      for: characteristic,
-      onSubscribedCentrals: centrals
+    let manager = ensurePeripheralManager()
+    let notification = PendingNotification(
+      value: value.toData(),
+      characteristic: characteristic,
+      centrals: centrals
     )
-    if !success {
+    if !pendingNotifications.submit(notification, send: { $0.send(with: manager) }) {
       throw UniversalBlePeripheralError.failed("Peripheral transmit queue full")
     }
+  }
+
+  nonisolated func peripheralManagerIsReady(toUpdateSubscribers peripheral: CBPeripheralManager) {
+    pendingNotifications.drain { $0.send(with: peripheral) }
   }
 
   nonisolated func peripheralManagerDidStartAdvertising(
@@ -188,6 +201,7 @@ final class UniversalBlePeripheralPlugin: NSObject, UniversalBlePeripheralChanne
 
   nonisolated func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
     if peripheral.state != .poweredOn {
+      pendingNotifications.removeAll()
       advertisingState = .idle
       callbackChannel.onAdvertisingStateChange(state: .idle, error: nil) { _ in }
     }
@@ -234,6 +248,11 @@ final class UniversalBlePeripheralPlugin: NSObject, UniversalBlePeripheralChanne
       centralId: central.identifier.uuidString,
       characteristicId: characteristic.uuid.uuidString
     )
+    pendingNotifications.removeAll { pending in
+      pending.characteristic.uuid == characteristic.uuid
+        && pending.centrals?.count == 1
+        && pending.centrals?.first?.identifier == central.identifier
+    }
     callbackChannel.onCharacteristicSubscriptionChange(
       deviceId: central.identifier.uuidString,
       characteristicId: characteristic.uuid.uuidString,
@@ -353,6 +372,16 @@ final class UniversalBlePeripheralPlugin: NSObject, UniversalBlePeripheralChanne
       return nil
     }
     return Int64(central.maximumUpdateValueLength)
+  }
+}
+
+private struct PendingNotification {
+  let value: Data
+  let characteristic: CBMutableCharacteristic
+  let centrals: [CBCentral]?
+
+  func send(with manager: CBPeripheralManager) -> Bool {
+    manager.updateValue(value, for: characteristic, onSubscribedCentrals: centrals)
   }
 }
 
