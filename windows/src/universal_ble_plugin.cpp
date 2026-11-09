@@ -3882,78 +3882,92 @@ fire_and_forget UniversalBlePlugin::PeripheralSubscribedClientsChanged(
   const auto callback = callback_operations_.TryAcquire();
   if (!callback.has_value())
     co_return;
-  const auto characteristic_id = guid_to_uuid(local_char.Uuid());
-  IVectorView<GattSubscribedClient> current_clients = nullptr;
-  IVectorView<GattSubscribedClient> old_clients = nullptr;
-  {
-    std::lock_guard<std::mutex> lock(peripheral_mutex_);
-    auto *characteristic_object =
-        FindPeripheralGattCharacteristicObject(characteristic_id);
-    if (characteristic_object == nullptr) {
-      co_return;
+  // A WinRT call below can throw, e.g. Session() or MaxPduSize() on a client
+  // whose link just dropped. An exception escaping a fire_and_forget
+  // coroutine terminates the process, so the whole handler is guarded and a
+  // failure only loses this one subscription report.
+  try {
+    const auto characteristic_id = guid_to_uuid(local_char.Uuid());
+    IVectorView<GattSubscribedClient> current_clients = nullptr;
+    IVectorView<GattSubscribedClient> old_clients = nullptr;
+    {
+      std::lock_guard<std::mutex> lock(peripheral_mutex_);
+      auto *characteristic_object =
+          FindPeripheralGattCharacteristicObject(characteristic_id);
+      if (characteristic_object == nullptr) {
+        co_return;
+      }
+      current_clients = local_char.SubscribedClients();
+      old_clients = characteristic_object->stored_clients;
+      characteristic_object->stored_clients = current_clients;
     }
-    current_clients = local_char.SubscribedClients();
-    old_clients = characteristic_object->stored_clients;
-    characteristic_object->stored_clients = current_clients;
-  }
 
-  for (uint32_t i = 0; i < current_clients.Size(); ++i) {
-    auto client = current_clients.GetAt(i);
-    bool found = false;
-    for (uint32_t j = 0; j < old_clients.Size(); ++j) {
-      if (old_clients.GetAt(j) == client) {
-        found = true;
-        break;
+    for (uint32_t i = 0; i < current_clients.Size(); ++i) {
+      auto client = current_clients.GetAt(i);
+      bool found = false;
+      for (uint32_t j = 0; j < old_clients.Size(); ++j) {
+        if (old_clients.GetAt(j) == client) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        const auto device_id =
+            ParsePeripheralBluetoothClientId(client.Session().DeviceId().Id());
+        std::string device_name;
+        try {
+          auto device_info = co_await DeviceInformation::CreateFromIdAsync(
+              client.Session().DeviceId().Id());
+          device_name = winrt::to_string(device_info.Name());
+        } catch (...) {
+        }
+        PostPeripheralReport(
+            [device_id, characteristic_id,
+             device_name](UniversalBlePeripheralCallback *peripheral_channel) {
+              const std::string *name_ptr =
+                  device_name.empty() ? nullptr : &device_name;
+              peripheral_channel->OnCharacteristicSubscriptionChange(
+                  device_id, characteristic_id, true, name_ptr, SuccessCallback,
+                  ErrorCallback);
+            });
+        const int64_t mtu = client.Session().MaxPduSize();
+        PostPeripheralReport(
+            [device_id, mtu](UniversalBlePeripheralCallback *peripheral_channel) {
+              peripheral_channel->OnMtuChange(device_id, mtu, SuccessCallback,
+                                              ErrorCallback);
+            });
       }
     }
-    if (!found) {
-      const auto device_id =
-          ParsePeripheralBluetoothClientId(client.Session().DeviceId().Id());
-      std::string device_name;
-      try {
-        auto device_info = co_await DeviceInformation::CreateFromIdAsync(
-            client.Session().DeviceId().Id());
-        device_name = winrt::to_string(device_info.Name());
-      } catch (...) {
-      }
-      PostPeripheralReport(
-          [device_id, characteristic_id,
-           device_name](UniversalBlePeripheralCallback *peripheral_channel) {
-            const std::string *name_ptr =
-                device_name.empty() ? nullptr : &device_name;
-            peripheral_channel->OnCharacteristicSubscriptionChange(
-                device_id, characteristic_id, true, name_ptr, SuccessCallback,
-                ErrorCallback);
-          });
-      const int64_t mtu = client.Session().MaxPduSize();
-      PostPeripheralReport(
-          [device_id, mtu](UniversalBlePeripheralCallback *peripheral_channel) {
-            peripheral_channel->OnMtuChange(device_id, mtu, SuccessCallback,
-                                            ErrorCallback);
-          });
-    }
-  }
 
-  for (uint32_t i = 0; i < old_clients.Size(); ++i) {
-    auto client = old_clients.GetAt(i);
-    bool found = false;
-    for (uint32_t j = 0; j < current_clients.Size(); ++j) {
-      if (current_clients.GetAt(j) == client) {
-        found = true;
-        break;
+    for (uint32_t i = 0; i < old_clients.Size(); ++i) {
+      auto client = old_clients.GetAt(i);
+      bool found = false;
+      for (uint32_t j = 0; j < current_clients.Size(); ++j) {
+        if (current_clients.GetAt(j) == client) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        const auto device_id =
+            ParsePeripheralBluetoothClientId(client.Session().DeviceId().Id());
+        PostPeripheralReport(
+            [device_id, characteristic_id](
+                UniversalBlePeripheralCallback *peripheral_channel) {
+              peripheral_channel->OnCharacteristicSubscriptionChange(
+                  device_id, characteristic_id, false, nullptr, SuccessCallback,
+                  ErrorCallback);
+            });
       }
     }
-    if (!found) {
-      const auto device_id =
-          ParsePeripheralBluetoothClientId(client.Session().DeviceId().Id());
-      PostPeripheralReport(
-          [device_id, characteristic_id](
-              UniversalBlePeripheralCallback *peripheral_channel) {
-            peripheral_channel->OnCharacteristicSubscriptionChange(
-                device_id, characteristic_id, false, nullptr, SuccessCallback,
-                ErrorCallback);
-          });
-    }
+  } catch (const hresult_error &err) {
+    UniversalBleLogger::LogError(
+        "PERIPHERAL_SUBSCRIBED_CLIENTS_CHANGED hresult_error hr=" +
+        std::to_string(err.code()) + " msg=" + to_string(err.message()));
+  } catch (const std::exception &ex) {
+    log_and_swallow("PERIPHERAL_SUBSCRIBED_CLIENTS_CHANGED", ex);
+  } catch (...) {
+    log_and_swallow_unknown("PERIPHERAL_SUBSCRIBED_CLIENTS_CHANGED");
   }
 }
 
@@ -3989,27 +4003,49 @@ fire_and_forget UniversalBlePlugin::PeripheralReadRequestedAsync(
          request](UniversalBlePeripheralCallback *peripheral_channel) {
           peripheral_channel->OnReadRequest(
               device_id, characteristicId, offset, value_arg,
-              // SuccessCallback
+              // SuccessCallback. Responding can throw when the request is
+              // no longer answerable (the client disconnected or the request
+              // timed out while Dart produced the value); this runs on the
+              // UI thread, so an escaping exception would end the app.
               [request, deferral](const PeripheralReadRequestResult *result) {
-                if (result != nullptr) {
-                  if (result->status() != nullptr) {
-                    request.RespondWithProtocolError(
-                        ToGattProtocolError(*result->status()));
-                    deferral.Complete();
-                    return;
+                try {
+                  if (result != nullptr) {
+                    if (result->status() != nullptr) {
+                      request.RespondWithProtocolError(
+                          ToGattProtocolError(*result->status()));
+                    } else {
+                      DataWriter writer;
+                      writer.ByteOrder(ByteOrder::LittleEndian);
+                      writer.WriteBuffer(from_bytevc(result->value()));
+                      request.RespondWithValue(writer.DetachBuffer());
+                    }
+                  } else {
+                    request.RespondWithProtocolError(0x01);
                   }
-                  DataWriter writer;
-                  writer.ByteOrder(ByteOrder::LittleEndian);
-                  writer.WriteBuffer(from_bytevc(result->value()));
-                  request.RespondWithValue(writer.DetachBuffer());
-                } else {
-                  request.RespondWithProtocolError(0x01);
+                } catch (const hresult_error &err) {
+                  UniversalBleLogger::LogError(
+                      "PERIPHERAL_READ_REQ response hresult_error hr=" +
+                      std::to_string(err.code()) +
+                      " msg=" + to_string(err.message()));
+                } catch (...) {
+                  UniversalBleLogger::LogError(
+                      "PERIPHERAL_READ_REQ response unknown exception");
                 }
                 deferral.Complete();
               },
               // ErrorCallback
               [request, deferral](const FlutterError &error) {
-                request.RespondWithProtocolError(0x0E);
+                try {
+                  request.RespondWithProtocolError(0x0E);
+                } catch (const hresult_error &err) {
+                  UniversalBleLogger::LogError(
+                      "PERIPHERAL_READ_REQ error-response hresult_error hr=" +
+                      std::to_string(err.code()) +
+                      " msg=" + to_string(err.message()));
+                } catch (...) {
+                  UniversalBleLogger::LogError(
+                      "PERIPHERAL_READ_REQ error-response unknown exception");
+                }
                 deferral.Complete();
               });
         });
