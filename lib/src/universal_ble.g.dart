@@ -3301,3 +3301,45 @@ abstract class UniversalBlePeripheralCallback {
     }
   }
 }
+
+/// Native -> Flutter: native-side errors and warnings (Windows). The native
+/// log otherwise only reaches stdout, which a release Windows app has none
+/// of, so failures the plugin catches and survives left no trace at all.
+abstract class UniversalBleNativeLogCallback {
+  static const MessageCodec<Object?> pigeonChannelCodec = _PigeonCodec();
+
+  void onNativeLog(BleLogLevel level, String message);
+
+  static void setUp(
+    UniversalBleNativeLogCallback? api, {
+    BinaryMessenger? binaryMessenger,
+    String messageChannelSuffix = '',
+  }) {
+    messageChannelSuffix =
+        messageChannelSuffix.isNotEmpty ? '.$messageChannelSuffix' : '';
+    {
+      final pigeonVar_channel = BasicMessageChannel<Object?>(
+          'dev.flutter.pigeon.universal_ble.UniversalBleNativeLogCallback.onNativeLog$messageChannelSuffix',
+          pigeonChannelCodec,
+          binaryMessenger: binaryMessenger);
+      if (api == null) {
+        pigeonVar_channel.setMessageHandler(null);
+      } else {
+        pigeonVar_channel.setMessageHandler((Object? message) async {
+          final List<Object?> args = message! as List<Object?>;
+          final BleLogLevel arg_level = args[0]! as BleLogLevel;
+          final String arg_message = args[1]! as String;
+          try {
+            api.onNativeLog(arg_level, arg_message);
+            return wrapResponse(empty: true);
+          } on PlatformException catch (e) {
+            return wrapResponse(error: e);
+          } catch (e) {
+            return wrapResponse(
+                error: PlatformException(code: 'error', message: e.toString()));
+          }
+        });
+      }
+    }
+  }
+}

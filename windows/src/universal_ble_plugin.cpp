@@ -110,7 +110,21 @@ UniversalBlePlugin::UniversalBlePlugin(
       peripheral_callback_channel_(
           std::make_unique<UniversalBlePeripheralCallback>(
               registrar->messenger())),
+      native_log_channel_(std::make_unique<UniversalBleNativeLogCallback>(
+          registrar->messenger())),
       ui_thread_handler_(registrar) {
+  // Native errors and warnings reach Dart in every build mode. Posted to the
+  // UI thread like every other callback; the destructor clears the sink
+  // before it shuts the handler down, and Shutdown drops queued posts, so
+  // the captured channel outlives every post that runs.
+  auto *log_channel = native_log_channel_.get();
+  UniversalBleLogger::SetSink(
+      this, [this, log_channel](BleLogLevel level, const std::string &message) {
+        ui_thread_handler_.Post([log_channel, level, message] {
+          log_channel->OnNativeLog(
+              level, message, [] {}, [](const FlutterError &) {});
+        });
+      });
   InitializeAsync();
 }
 
@@ -129,6 +143,8 @@ void UniversalBlePlugin::PostPeripheralReport(
 }
 
 UniversalBlePlugin::~UniversalBlePlugin() {
+  // First, so teardown's own errors don't post to a handler being shut down.
+  UniversalBleLogger::ClearSink(this);
   // Stop new WinRT callbacks from entering, let callbacks which already hold a
   // lease finish while every member is still alive, then release owned state.
   callback_operations_.Close();
@@ -156,6 +172,7 @@ UniversalBlePlugin::~UniversalBlePlugin() {
   ui_thread_handler_.Shutdown();
   callback_channel_.reset();
   peripheral_callback_channel_.reset();
+  native_log_channel_.reset();
 }
 
 // UniversalBlePlatformChannel implementation.

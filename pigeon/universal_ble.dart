@@ -795,3 +795,11 @@ enum UniversalBleErrorCode {
   // Web-specific errors
   webBluetoothGloballyDisabled,
 }
+
+/// Native -> Flutter: native-side errors and warnings (Windows). The native
+/// log otherwise only reaches stdout, which a release Windows app has none
+/// of, so failures the plugin catches and survives left no trace at all.
+@FlutterApi()
+abstract class UniversalBleNativeLogCallback {
+  void onNativeLog(BleLogLevel level, String message);
+}

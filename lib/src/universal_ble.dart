@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:universal_ble/src/universal_ble.g.dart'
+    show UniversalBleNativeLogCallback;
 import 'package:universal_ble/src/universal_ble_linux/universal_ble_linux_instance.dart';
 import 'package:universal_ble/src/universal_ble_pigeon/universal_ble_pigeon_channel.dart';
 import 'package:universal_ble/src/universal_ble_web/universal_ble_web.dart';
@@ -35,6 +37,17 @@ class UniversalBle {
   /// Set to null to disable.
   static set timeout(Duration? duration) {
     _bleCommandQueue.timeout = duration;
+  }
+
+  /// Receives the native plugin's errors and warnings in every build mode,
+  /// independent of [setLogLevel]. Windows only for now: its native log
+  /// otherwise only reaches stdout, which a release app has none of, so an
+  /// error the plugin catches and survives left no trace. Messages arrive on
+  /// the platform thread. Null stops delivery.
+  static set nativeLogHandler(
+      void Function(BleLogLevel level, String message)? handler) {
+    UniversalBleNativeLogCallback.setUp(
+        handler == null ? null : _NativeLogForwarder(handler));
   }
 
   /// Set log level for both Dart and native implementations.
@@ -1252,4 +1265,14 @@ class _PendingDiscovery {
   final Future<List<BleService>> future;
   final bool withDescriptors;
   final DiscoverServicesPlatformConfig? platformConfig;
+}
+
+class _NativeLogForwarder extends UniversalBleNativeLogCallback {
+  _NativeLogForwarder(this._handler);
+
+  final void Function(BleLogLevel level, String message) _handler;
+
+  @override
+  void onNativeLog(BleLogLevel level, String message) =>
+      _handler(level, message);
 }

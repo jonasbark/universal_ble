@@ -386,6 +386,8 @@ private:
   // teardown, dropping the surviving engine's callbacks.
   std::unique_ptr<UniversalBleCallbackChannel> callback_channel_;
   std::unique_ptr<UniversalBlePeripheralCallback> peripheral_callback_channel_;
+  // Carries native errors and warnings to Dart (UniversalBleLogger's sink).
+  std::unique_ptr<UniversalBleNativeLogCallback> native_log_channel_;
 
   // PostCentralReport/PostPeripheralReport post callbacks that capture this
   // instance's channel; the few posted directly capture `this` for other state.

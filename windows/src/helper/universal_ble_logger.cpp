@@ -6,6 +6,42 @@
 namespace universal_ble {
 
 std::atomic<BleLogLevel> UniversalBleLogger::current_level_{BleLogLevel::kNone};
+std::mutex UniversalBleLogger::sink_mutex_;
+const void *UniversalBleLogger::sink_owner_ = nullptr;
+UniversalBleLogger::Sink UniversalBleLogger::sink_;
+
+void UniversalBleLogger::SetSink(const void *owner, Sink sink) {
+  std::lock_guard<std::mutex> lock(sink_mutex_);
+  sink_owner_ = owner;
+  sink_ = std::move(sink);
+}
+
+void UniversalBleLogger::ClearSink(const void *owner) {
+  std::lock_guard<std::mutex> lock(sink_mutex_);
+  if (sink_owner_ != owner)
+    return;
+  sink_owner_ = nullptr;
+  sink_ = nullptr;
+}
+
+void UniversalBleLogger::Forward(BleLogLevel level,
+                                 const std::string &message) {
+  // A sink that logs would re-enter here on the same thread and deadlock on
+  // the non-recursive mutex; drop the nested message instead.
+  thread_local bool forwarding = false;
+  if (forwarding)
+    return;
+  forwarding = true;
+  try {
+    // Called under the lock so ClearSink (plugin teardown) cannot destroy
+    // the sink while it runs.
+    std::lock_guard<std::mutex> lock(sink_mutex_);
+    if (sink_)
+      sink_(level, message);
+  } catch (...) {
+  }
+  forwarding = false;
+}
 
 static std::string GetCurrentTimestampString() {
   auto now = std::chrono::system_clock::now();
@@ -32,12 +68,14 @@ BleLogLevel UniversalBleLogger::current_log_level() {
 }
 
 void UniversalBleLogger::LogError(const std::string &message) {
+  Forward(BleLogLevel::kError, message);
   if (!Allows(BleLogLevel::kError))
     return;
   std::cout << "UniversalBle:ERROR " << message << std::endl;
 }
 
 void UniversalBleLogger::LogWarning(const std::string &message) {
+  Forward(BleLogLevel::kWarning, message);
   if (!Allows(BleLogLevel::kWarning))
     return;
   std::cout << "UniversalBle:WARN " << message << std::endl;

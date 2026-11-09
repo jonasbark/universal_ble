@@ -53,6 +53,7 @@ template<class T> class ErrorOr {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   ErrorOr() = default;
   T TakeValue() && { return std::get<T>(std::move(v_)); }
 
@@ -320,6 +321,7 @@ class UniversalBleScanResult {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   std::string device_id_;
   std::optional<std::string> name_;
@@ -368,6 +370,7 @@ class UniversalDevicePickerResult {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   std::string device_id_;
   std::optional<std::string> name_;
@@ -406,6 +409,7 @@ class UniversalBleService {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   std::string uuid_;
   std::optional<::flutter::EncodableList> characteristics_;
@@ -442,6 +446,7 @@ class UniversalBleCharacteristic {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   std::string uuid_;
   ::flutter::EncodableList properties_;
@@ -470,6 +475,7 @@ class UniversalBleDescriptor {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   std::string uuid_;
 };
@@ -518,6 +524,7 @@ class BleConnectionParametersChange {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   std::string device_id_;
   int64_t interval_;
@@ -612,6 +619,7 @@ class AndroidOptions {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   std::optional<bool> request_location_permission_;
   std::optional<AndroidScanMode> scan_mode_;
@@ -663,6 +671,7 @@ class UniversalScanConfig {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   std::unique_ptr<AndroidOptions> android_;
   std::optional<bool> skip_duplicates_;
@@ -706,6 +715,7 @@ class UniversalScanFilter {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   ::flutter::EncodableList with_services_;
   ::flutter::EncodableList with_name_prefix_;
@@ -754,6 +764,7 @@ class ManufacturerDataFilter {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   int64_t company_identifier_;
   std::optional<std::vector<uint8_t>> payload_prefix_;
@@ -787,6 +798,7 @@ class UniversalManufacturerData {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   int64_t company_identifier_;
   std::vector<uint8_t> data_;
@@ -850,6 +862,7 @@ class AppleConnectionOptions {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   std::optional<bool> notify_on_connection_;
   std::optional<bool> notify_on_disconnection_;
@@ -917,6 +930,7 @@ class AppleAccessoryPickerItem {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   std::string display_name_;
   std::string image_asset_;
@@ -952,6 +966,7 @@ class AppleAccessorySetupOptions {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   ::flutter::EncodableList items_;
 };
@@ -990,6 +1005,7 @@ class AndroidConnectionOptions {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   std::optional<bool> close_gatt_on_detach_;
 };
@@ -1031,6 +1047,7 @@ class ConnectionPlatformConfig {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   std::unique_ptr<AppleConnectionOptions> apple_;
   std::unique_ptr<AndroidConnectionOptions> android_;
@@ -1069,6 +1086,7 @@ class AndroidDiscoverServicesOptions {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   std::optional<bool> clear_gatt_cache_;
 };
@@ -1107,6 +1125,7 @@ class DiscoverServicesPlatformConfig {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   std::unique_ptr<AndroidDiscoverServicesOptions> android_;
 };
@@ -1150,6 +1169,7 @@ class PeripheralAndroidOptions {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   std::optional<bool> add_manufacturer_data_in_scan_response_;
   std::optional<bool> add_services_in_scan_response_;
@@ -1186,6 +1206,7 @@ class PeripheralPlatformConfig {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   std::unique_ptr<PeripheralAndroidOptions> android_;
 };
@@ -1223,6 +1244,7 @@ class PeripheralService {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   std::string uuid_;
   bool primary_;
@@ -1276,6 +1298,7 @@ class PeripheralCharacteristic {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   std::string uuid_;
   ::flutter::EncodableList properties_;
@@ -1320,6 +1343,7 @@ class PeripheralDescriptor {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   std::string uuid_;
   std::optional<std::vector<uint8_t>> value_;
@@ -1362,6 +1386,7 @@ class PeripheralReadRequestResult {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   std::vector<uint8_t> value_;
   std::optional<int64_t> offset_;
@@ -1405,6 +1430,7 @@ class PeripheralWriteRequestResult {
   friend class UniversalBlePeripheralChannel;
   friend class UniversalBleAndroidChannel;
   friend class UniversalBlePeripheralCallback;
+  friend class UniversalBleNativeLogCallback;
   friend class PigeonInternalCodecSerializer;
   std::optional<std::vector<uint8_t>> value_;
   std::optional<int64_t> offset_;
@@ -1731,6 +1757,28 @@ class UniversalBlePeripheralCallback {
   void OnConnectionStateChange(
     const std::string& device_id,
     bool connected,
+    std::function<void(void)>&& on_success,
+    std::function<void(const FlutterError&)>&& on_error);
+ private:
+  ::flutter::BinaryMessenger* binary_messenger_;
+  std::string message_channel_suffix_;
+};
+
+// Native -> Flutter: native-side errors and warnings (Windows). The native
+// log otherwise only reaches stdout, which a release Windows app has none
+// of, so failures the plugin catches and survives left no trace at all.
+//
+// Generated class from Pigeon that represents Flutter messages that can be called from C++.
+class UniversalBleNativeLogCallback {
+ public:
+  UniversalBleNativeLogCallback(::flutter::BinaryMessenger* binary_messenger);
+  UniversalBleNativeLogCallback(
+    ::flutter::BinaryMessenger* binary_messenger,
+    const std::string& message_channel_suffix);
+  static const ::flutter::StandardMessageCodec& GetCodec();
+  void OnNativeLog(
+    const BleLogLevel& level,
+    const std::string& message,
     std::function<void(void)>&& on_success,
     std::function<void(const FlutterError&)>&& on_error);
  private:

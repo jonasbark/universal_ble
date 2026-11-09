@@ -3185,3 +3185,35 @@ class UniversalBlePeripheralCallback(private val binaryMessenger: BinaryMessenge
     }
   }
 }
+/**
+ * Native -> Flutter: native-side errors and warnings (Windows). The native
+ * log otherwise only reaches stdout, which a release Windows app has none
+ * of, so failures the plugin catches and survives left no trace at all.
+ *
+ * Generated class from Pigeon that represents Flutter messages that can be called from Kotlin.
+ */
+class UniversalBleNativeLogCallback(private val binaryMessenger: BinaryMessenger, private val messageChannelSuffix: String = "") {
+  companion object {
+    /** The codec used by UniversalBleNativeLogCallback. */
+    val codec: MessageCodec<Any?> by lazy {
+      UniversalBlePigeonCodec()
+    }
+  }
+  fun onNativeLog(levelArg: BleLogLevel, messageArg: String, callback: (Result<Unit>) -> Unit)
+{
+    val separatedMessageChannelSuffix = if (messageChannelSuffix.isNotEmpty()) ".$messageChannelSuffix" else ""
+    val channelName = "dev.flutter.pigeon.universal_ble.UniversalBleNativeLogCallback.onNativeLog$separatedMessageChannelSuffix"
+    val channel = BasicMessageChannel<Any?>(binaryMessenger, channelName, codec)
+    channel.send(listOf(levelArg, messageArg)) {
+      if (it is List<*>) {
+        if (it.size > 1) {
+          callback(Result.failure(FlutterError(it[0] as String, it[1] as String, it[2] as String?)))
+        } else {
+          callback(Result.success(Unit))
+        }
+      } else {
+        callback(Result.failure(UniversalBlePigeonUtils.createConnectionError(channelName)))
+      } 
+    }
+  }
+}
