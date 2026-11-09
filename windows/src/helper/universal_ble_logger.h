@@ -5,6 +5,8 @@
 #include <iostream>
 #include <mutex>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "../generated/universal_ble.g.h"
 
@@ -18,8 +20,9 @@ public:
   // where the level-gated log goes, does not exist in a release Windows app.
   // The sink must not log itself, and must be cheap (it runs under a lock on
   // the logging thread); the plugin's posts the message to the UI thread.
-  // [owner] identifies the plugin instance, so only the instance that
-  // installed a sink can clear it.
+  // Each plugin instance (one per Flutter engine, e.g. a second window)
+  // installs its own sink under [owner]; a message goes to all of them, and
+  // an instance's teardown removes only its own.
   static void SetSink(const void *owner, Sink sink);
   static void ClearSink(const void *owner);
 
@@ -40,8 +43,7 @@ private:
   static void Forward(BleLogLevel level, const std::string &message);
 
   static std::mutex sink_mutex_;
-  static const void *sink_owner_;
-  static Sink sink_;
+  static std::vector<std::pair<const void *, Sink>> sinks_;
 };
 
 }  // namespace universal_ble

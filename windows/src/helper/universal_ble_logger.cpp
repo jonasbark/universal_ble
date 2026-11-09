@@ -7,21 +7,28 @@ namespace universal_ble {
 
 std::atomic<BleLogLevel> UniversalBleLogger::current_level_{BleLogLevel::kNone};
 std::mutex UniversalBleLogger::sink_mutex_;
-const void *UniversalBleLogger::sink_owner_ = nullptr;
-UniversalBleLogger::Sink UniversalBleLogger::sink_;
+std::vector<std::pair<const void *, UniversalBleLogger::Sink>>
+    UniversalBleLogger::sinks_;
 
 void UniversalBleLogger::SetSink(const void *owner, Sink sink) {
   std::lock_guard<std::mutex> lock(sink_mutex_);
-  sink_owner_ = owner;
-  sink_ = std::move(sink);
+  for (auto &entry : sinks_) {
+    if (entry.first == owner) {
+      entry.second = std::move(sink);
+      return;
+    }
+  }
+  sinks_.emplace_back(owner, std::move(sink));
 }
 
 void UniversalBleLogger::ClearSink(const void *owner) {
   std::lock_guard<std::mutex> lock(sink_mutex_);
-  if (sink_owner_ != owner)
-    return;
-  sink_owner_ = nullptr;
-  sink_ = nullptr;
+  for (auto it = sinks_.begin(); it != sinks_.end(); ++it) {
+    if (it->first == owner) {
+      sinks_.erase(it);
+      return;
+    }
+  }
 }
 
 void UniversalBleLogger::Forward(BleLogLevel level,
@@ -36,8 +43,10 @@ void UniversalBleLogger::Forward(BleLogLevel level,
     // Called under the lock so ClearSink (plugin teardown) cannot destroy
     // the sink while it runs.
     std::lock_guard<std::mutex> lock(sink_mutex_);
-    if (sink_)
-      sink_(level, message);
+    for (auto &entry : sinks_) {
+      if (entry.second)
+        entry.second(level, message);
+    }
   } catch (...) {
   }
   forwarding = false;
