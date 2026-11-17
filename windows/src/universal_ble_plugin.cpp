@@ -3384,7 +3384,7 @@ std::optional<FlutterError> UniversalBlePlugin::RemoveService(
 
   const auto it = peripheral_service_provider_map_.find(service_id_lc);
   if (it == peripheral_service_provider_map_.end()) {
-    return FlutterError("not-found", "Service not found", nullptr);
+    return FlutterError("not-found", "Service not found");
   }
 
   DisposePeripheralServiceProvider(it->second);
@@ -3615,8 +3615,7 @@ std::optional<FlutterError> UniversalBlePlugin::UpdateCharacteristic(
     if (device_id != nullptr) {
       return FlutterError("not-supported",
                           "Windows does not support targeting a specific "
-                          "device for notifications",
-                          nullptr);
+                          "device for notifications");
     }
     bool ambiguous_match = false;
     auto *characteristic_object = FindPeripheralGattCharacteristicObject(
@@ -3624,11 +3623,10 @@ std::optional<FlutterError> UniversalBlePlugin::UpdateCharacteristic(
     if (ambiguous_match) {
       return FlutterError("ambiguous-characteristic",
                           "Characteristic UUID exists in multiple services; "
-                          "cannot update uniquely",
-                          nullptr);
+                          "cannot update uniquely");
     }
     if (characteristic_object == nullptr) {
-      return FlutterError("not-found", "Characteristic not found", nullptr);
+      return FlutterError("not-found", "Characteristic not found");
     }
     IBuffer bytes = from_bytevc(value);
     DataWriter writer;
@@ -3649,14 +3647,12 @@ std::optional<FlutterError> UniversalBlePlugin::UpdateCharacteristic(
     if (!notify_result) {
       return FlutterError(
           "failed",
-          "Failed to notify subscribed clients for characteristic update",
-          nullptr);
+          "Failed to notify subscribed clients for characteristic update");
     }
   } catch (...) {
     return FlutterError(
         "failed",
-        "Failed to notify subscribed clients for characteristic update",
-        nullptr);
+        "Failed to notify subscribed clients for characteristic update");
   }
   return std::nullopt;
 }
