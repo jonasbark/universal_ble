@@ -67,23 +67,25 @@ int main() {
   CHECK(!continuation_on_sta);
 
   // Off an STA there is nothing to leave: no extra thread hop.
-  DWORD worker_thread = 0;
-  DWORD thread_after = 0;
+  struct Threads {
+    DWORD worker = 0;
+    DWORD after = 0;
+  } threads;
   HANDLE worker = CreateThread(
       nullptr, 0,
       [](LPVOID param) -> DWORD {
-        auto *threads = static_cast<DWORD **>(param);
+        auto *t = static_cast<Threads *>(param);
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
-        *threads[0] = GetCurrentThreadId();
-        AlreadyOffUiThread(*threads[1]);
+        t->worker = GetCurrentThreadId();
+        AlreadyOffUiThread(t->after);
         return 0;
       },
-      new DWORD *[2]{&worker_thread, &thread_after}, 0, nullptr);
+      &threads, 0, nullptr);
   CHECK(worker != nullptr);
   WaitForSingleObject(worker, 5000);
   CloseHandle(worker);
-  CHECK(worker_thread != 0);
-  CHECK(thread_after == worker_thread);
+  CHECK(threads.worker != 0);
+  CHECK(threads.after == threads.worker);
 
   CoUninitialize();
   std::cout << "off_ui_thread_test passed" << std::endl;

@@ -21,6 +21,7 @@
 #include "helper/universal_ble_logger.h"
 #include "helper/universal_enum.h"
 #include "helper/utils.h"
+#include "off_ui_thread.h"
 #include "pin_entry.h"
 #include "scan_result_merge.h"
 #include "universal_ble_filter_util.h"
@@ -2027,6 +2028,13 @@ fire_and_forget UniversalBlePlugin::ConnectAsync(uint64_t bluetooth_address,
     }
   };
   try {
+    // Connect is called on Flutter's UI thread (STA), and C++/WinRT resumes
+    // every co_await below on that same thread. Each Bluetooth call in this
+    // attempt goes to the Bluetooth service in svchost; a peripheral that
+    // reboots mid-connect (Click V2 left side, about once a minute) can stall
+    // it, and on the STA that hangs the window (MoAppHangXProc waiting on
+    // svchost). Results reach Dart via NotifyConnectionChanged, which posts.
+    co_await resume_off_ui_thread{};
     // Old services can deny replacement discovery until Close finishes. Yield
     // rather than block Flutter's UI thread, and abandon superseded attempts.
     for (;;) {
